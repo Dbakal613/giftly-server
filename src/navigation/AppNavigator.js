@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { supabase } from '../lib/supabase';
@@ -23,11 +24,13 @@ export default function AppNavigator() {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) checkOnboarding(session.user.id);
-      else setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        if (session) checkOnboarding(session.user.id);
+        else setLoading(false);
+      })
+      .catch(() => setLoading(false));
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
@@ -69,7 +72,11 @@ export default function AppNavigator() {
     setNeedsOnboarding(false);
   }
 
-  if (loading) return null;
+  if (loading) return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAFAF7' }}>
+      <ActivityIndicator size="large" color="#D94F3D" />
+    </View>
+  );
 
   // Not logged in
   if (!session) {

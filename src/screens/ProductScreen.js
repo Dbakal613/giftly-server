@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Linking, TextInput, Modal, Image } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { buildProductUrl, STORES } from '../lib/affiliates';
 
 const LISTS = [
   { key: 'want_to_buy', label: '🛍️ Quiero comprar' },
@@ -18,6 +17,11 @@ export default function ProductScreen({ route, navigation }) {
   const [targetPrice, setTargetPrice] = useState(product.price ? String(Math.round(product.price * 0.9)) : '');
   const [savingAlert, setSavingAlert] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [savingReview, setSavingReview] = useState(false);
+  const [reviewProductId, setReviewProductId] = useState(null);
 
   function showToast(msg) {
     setSuccessMsg(msg);
@@ -40,9 +44,33 @@ export default function ProductScreen({ route, navigation }) {
         }
       }
       await supabase.from('list_items').upsert({ user_id: user.id, product_id: productId, list_type: listType }, { onConflict: 'user_id,product_id,list_type' });
-      showToast('✓ Agregado a tu lista');
+      if (listType === 'recommend') {
+        setReviewProductId(productId);
+        setReviewRating(0);
+        setReviewText('');
+        setShowReviewModal(true);
+      } else {
+        showToast('✓ Agregado a tu lista');
+      }
     } catch (e) { console.error(e); }
     finally { setAdding(false); }
+  }
+
+  async function saveReview() {
+    setSavingReview(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from('reviews').insert({
+        user_id: user.id,
+        product_id: reviewProductId,
+        rating: reviewRating,
+        comment: reviewText.trim(),
+      });
+      setShowReviewModal(false);
+      showToast('⭐ Review publicado');
+    } catch (e) { console.error(e); }
+    finally { setSavingReview(false); }
   }
 
   async function saveAlert() {
@@ -92,34 +120,6 @@ export default function ProductScreen({ route, navigation }) {
           <Text style={styles.store}>Disponible en {product.store}</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💰 Comparar precios</Text>
-          {STORES.map(({ name, dot }) => {
-            const isThisStore = name === product.store;
-            const url = buildProductUrl(
-              name,
-              isThisStore ? (product.permalink || null) : null,
-              product.name
-            );
-            return (
-              <TouchableOpacity
-                key={name}
-                style={[styles.priceRow, isThisStore && styles.priceRowBest]}
-                onPress={() => Linking.openURL(url)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.storeDot, { backgroundColor: dot }]} />
-                <Text style={styles.storeName}>{name}</Text>
-                {isThisStore
-                  ? <Text style={styles.priceBest}>${Math.round(product.price || 0).toLocaleString('es-CL')} 🏆</Text>
-                  : <Text style={styles.priceLink}>Buscar →</Text>
-                }
-              </TouchableOpacity>
-            );
-          })}
-          <Text style={styles.priceNote}>Toca una tienda para ver su precio actual</Text>
-        </View>
-
         <View style={styles.actions}>
           <TouchableOpacity style={styles.btnPrimary} onPress={() => setShowListModal(true)} disabled={adding}>
             {adding ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>🛍️ Agregar a mi lista</Text>}
@@ -130,6 +130,11 @@ export default function ProductScreen({ route, navigation }) {
           <TouchableOpacity style={styles.btnGift} onPress={() => navigation.navigate('GroupGift', { product })}>
             <Text style={styles.btnGiftText}>🎁 Crear regalo grupal</Text>
           </TouchableOpacity>
+          {product.permalink ? (
+            <TouchableOpacity style={styles.btnStore} onPress={() => Linking.openURL(product.permalink)}>
+              <Text style={styles.btnStoreText}>🔗 Ver en {product.store || 'tienda'}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </ScrollView>
 
@@ -153,8 +158,8 @@ export default function ProductScreen({ route, navigation }) {
 
       {/* Modal alerta de precio */}
       <Modal visible={showAlertModal} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} onPress={() => setShowAlertModal(false)}>
-          <View style={styles.modalBox}>
+        <TouchableOpacity style={styles.modalOverlay} onPress={() => setShowAlertModal(false)} activeOpacity={1}>
+          <TouchableOpacity activeOpacity={1} style={styles.modalBox}>
             <Text style={styles.modalTitle}>🔔 Alerta de precio</Text>
             <Text style={styles.modalProduct}>Te avisamos cuando baje de:</Text>
             <View style={styles.priceInputWrap}>
@@ -168,7 +173,43 @@ export default function ProductScreen({ route, navigation }) {
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowAlertModal(false)}>
               <Text style={styles.cancelBtnText}>Cancelar</Text>
             </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal review */}
+      <Modal visible={showReviewModal} transparent animationType="slide">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1}>
+          <TouchableOpacity activeOpacity={1} style={styles.modalBox}>
+            <Text style={styles.modalTitle}>⭐ Deja tu review</Text>
+            <Text style={styles.modalProduct} numberOfLines={1}>{product.name}</Text>
+            <View style={styles.starsRow}>
+              {[1, 2, 3, 4, 5].map(star => (
+                <TouchableOpacity key={star} onPress={() => setReviewRating(star)}>
+                  <Text style={[styles.starIcon, { color: star <= reviewRating ? '#F5A623' : '#D0CFC8' }]}>★</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={styles.reviewInput}
+              placeholder="Cuéntanos tu experiencia..."
+              value={reviewText}
+              onChangeText={setReviewText}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+            />
+            <TouchableOpacity
+              style={[styles.btnPrimary, reviewRating === 0 && { opacity: 0.5 }]}
+              onPress={saveReview}
+              disabled={savingReview || reviewRating === 0}
+            >
+              {savingReview ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>Publicar review</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowReviewModal(false); showToast('✓ Agregado a tu lista'); }}>
+              <Text style={styles.cancelBtnText}>Omitir</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     </View>
@@ -193,16 +234,6 @@ const styles = StyleSheet.create({
   name: { fontSize: 22, fontWeight: '700', color: '#1A1A18', marginBottom: 10 },
   price: { fontSize: 32, fontWeight: '700', color: '#D94F3D', marginBottom: 6 },
   store: { fontSize: 13, color: '#8A8A82' },
-  section: { backgroundColor: '#FFFFFF', padding: 20, marginBottom: 12 },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A18', marginBottom: 14 },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, marginBottom: 6, backgroundColor: '#FAFAF7' },
-  priceRowBest: { backgroundColor: '#DCF5EB' },
-  storeName: { fontSize: 14, fontWeight: '500', color: '#1A1A18' },
-  storeDot: { width: 10, height: 10, borderRadius: 5, flexShrink: 0 },
-  priceBest: { fontSize: 14, fontWeight: '700', color: '#2D8C5E' },
-  priceOther: { fontSize: 14, color: '#8A8A82' },
-  priceLink: { fontSize: 14, color: '#3D7DD9', fontWeight: '500' },
-  priceNote: { fontSize: 11, color: '#8A8A82', textAlign: 'center', marginTop: 6 },
   actions: { padding: 20, gap: 10 },
   btnPrimary: { backgroundColor: '#D94F3D', borderRadius: 14, padding: 16, alignItems: 'center' },
   btnPrimaryText: { color: 'white', fontSize: 16, fontWeight: '700' },
@@ -210,8 +241,8 @@ const styles = StyleSheet.create({
   btnAlertText: { color: 'white', fontSize: 15, fontWeight: '600' },
   btnGift: { backgroundColor: '#2D8C5E', borderRadius: 14, padding: 16, alignItems: 'center' },
   btnGiftText: { color: 'white', fontSize: 15, fontWeight: '600' },
-  btnSecondary: { borderWidth: 1.5, borderColor: '#1A1A18', borderRadius: 14, padding: 16, alignItems: 'center' },
-  btnSecondaryText: { color: '#1A1A18', fontSize: 15, fontWeight: '600' },
+  btnStore: { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 14, padding: 16, alignItems: 'center', backgroundColor: '#FAFAF7' },
+  btnStoreText: { color: '#1A1A18', fontSize: 15, fontWeight: '500' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox: { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, margin: 16, gap: 10 },
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A18' },
@@ -224,4 +255,7 @@ const styles = StyleSheet.create({
   pricePrefix: { fontSize: 24, fontWeight: '700', color: '#8A8A82', marginRight: 4 },
   priceInput: { flex: 1, fontSize: 32, fontWeight: '700', color: '#1A1A18', paddingVertical: 14 },
   modalHint: { fontSize: 13, color: '#8A8A82' },
+  starsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, paddingVertical: 8 },
+  starIcon: { fontSize: 40 },
+  reviewInput: { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 12, padding: 14, fontSize: 15, color: '#1A1A18', minHeight: 90 },
 });

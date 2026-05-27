@@ -1,20 +1,28 @@
 import { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Modal, Image, ScrollView
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Modal, Image, ScrollView, Dimensions, Linking,
 } from 'react-native';
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 import { SERVER_URL } from '../lib/config';
-import { colors, radius, shadow } from '../lib/theme';
 
-const LISTS = [
-  { key: 'want_to_buy',    label: '🛍️ Quiero comprar', color: '#D94F3D' },
-  { key: 'bought',         label: '✅ Compré',          color: '#2D8C5E' },
-  { key: 'recommend',      label: '👍 Recomiendo',      color: '#3D7DD9' },
-  { key: 'not_recommend',  label: '👎 No recomiendo',   color: '#8A8A82' },
-];
+const { width } = Dimensions.get('window');
+const CARD_W = (width - 48) / 2;
 
+// ── Store branding ────────────────────────────────────────────────────────────
+const STORE = {
+  MercadoLibre: { color: '#E8A020', bg: '#FFF8E6', label: 'MercadoLibre' },
+  Falabella:    { color: '#1E6FCC', bg: '#E8F0FF', label: 'Falabella' },
+  Paris:        { color: '#1B7A42', bg: '#E6F5EC', label: 'Paris' },
+  Ripley:       { color: '#C0392B', bg: '#FDEAE8', label: 'Ripley' },
+};
+
+function storeStyle(source) {
+  return STORE[source] || { color: '#8A8A82', bg: '#F0EFE8', label: source };
+}
+
+// ── Category browsing (ML only, fast) ────────────────────────────────────────
 const CATEGORIES = [
   { label: 'Todo',        queries: ['tecnologia', 'zapatillas', 'hogar'] },
   { label: 'Tecnología',  queries: ['smartphone iphone samsung', 'laptop notebook', 'audifonos airpods'] },
@@ -25,170 +33,288 @@ const CATEGORIES = [
   { label: 'Juguetes',    queries: ['lego', 'juguetes niños', 'consola videojuegos'] },
 ];
 
-function extractBrand(attributes = []) {
-  return attributes.find(a => a.id === 'BRAND')?.value_name || '';
+// ── Data fetching ─────────────────────────────────────────────────────────────
+
+// Multi-retailer search (for explicit text queries)
+async function fetchMultiRetailer(q, limit = 20) {
+  const res = await axios.get(`${SERVER_URL}/search`, {
+    params: { q, limit },
+    timeout: 25000, // Puppeteer is slow — give it time
+  });
+  return res.data?.results || [];
 }
 
-function mapMLProduct(item) {
+// ML-only search (for fast category browsing)
+async function fetchML(q, limit = 10) {
+  const res = await axios.get(`${SERVER_URL}/search/ml`, {
+    params: { q, limit },
+    timeout: 10000,
+  });
+  return (res.data?.results || []).map(item => ({
+    // Server v2 already normalizes, but handle old format too
+    externalId: item.externalId || item.id,
+    source:     item.source || item.store || 'MercadoLibre',
+    name:       item.name,
+    price:      item.price,
+    imageUrl:   item.imageUrl || item.image_url,
+    permalink:  item.permalink,
+    brand:      item.brand || '',
+    currency:   'CLP',
+  }));
+}
+
+// Unified item key across all sources
+function itemKey(item) {
+  if (item.externalId) return `${item.source}_${item.externalId}`;
+  if (item.mlId)       return `MercadoLibre_${item.mlId}`;
+  return `${item.source || 'x'}_${item.name}`;
+}
+
+// Map item to ProductScreen-compatible shape
+function toProductShape(item) {
   return {
-    id: null,
-    mlId: item.id,
-    name: item.title,
-    price: item.price,
-    image_url: item.thumbnail?.replace('-I.jpg', '-O.jpg') || item.thumbnail || null,
-    store: 'MercadoLibre',
-    brand: extractBrand(item.attributes),
-    category: '',
-    permalink: item.permalink,
-    isMLProduct: true,
+    name:        item.name,
+    brand:       item.brand || '',
+    store:       item.source || item.store || 'MercadoLibre',
+    price:       item.price,
+    image_url:   item.imageUrl || item.image_url || null,
+    image_emoji: '📦',
+    category:    item.category || '',
+    permalink:   item.permalink || null,
   };
 }
 
-async function fetchFromML(q, limit = 10) {
-  const res = await axios.get(`${SERVER_URL}/search`, { params: { q, limit }, timeout: 4000 });
-  return (res.data?.results || []).map(mapMLProduct);
+// ── Grouping ──────────────────────────────────────────────────────────────────
+const STOP = new Set([
+  'de','del','con','los','las','para','por','una','uno','el','la','al','se',
+  'en','y','a','e','un','o','u','cm','gb','tb','mb','bluetooth','wifi',
+  'inalambrico','inalámbrico','nuevo','nueva','original','sellado','liberado',
+]);
+
+function normalizeToken(w) {
+  return w
+    .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip accents
+    .toLowerCase()
+    .replace(/(\d+)(ra|da|ro|do|ta|to|ma|mo|er)$/i, '$1'); // "2da" → "2"
 }
 
-async function fetchFromSupabase(q) {
-  const { data } = await supabase
-    .from('products')
-    .select('*')
-    .or(`name.ilike.%${q}%,brand.ilike.%${q}%,category.ilike.%${q}%,store.ilike.%${q}%`)
-    .gt('price', 0);
-  return (data || []);
+function getGroupKey(name, brand) {
+  const brandNorm = normalizeToken(brand || '');
+  const tokens = name
+    .replace(/[()[\]{}"']/g, ' ')
+    .split(/[\s,.\\/|+]+/)
+    .map(normalizeToken)
+    .filter(w => w.length > 1 && !STOP.has(w));
+
+  // Prepend brand if it's meaningful and not already first token
+  const withBrand = brandNorm && tokens[0] !== brandNorm
+    ? [brandNorm, ...tokens]
+    : tokens;
+
+  return withBrand.slice(0, 4).join(' ');
 }
 
-async function fetchQuery(q, limit = 10) {
-  try {
-    const items = await fetchFromML(q, limit);
-    if (items.length > 0) return items;
-    return await fetchFromSupabase(q);
-  } catch {
-    return await fetchFromSupabase(q);
+function groupItems(items) {
+  const map = new Map();
+  for (const item of items) {
+    const key = getGroupKey(item.name, item.brand);
+    if (!map.has(key)) {
+      const label = key.replace(/\b\w/g, c => c.toUpperCase());
+      map.set(key, { key, label, items: [] });
+    }
+    map.get(key).items.push(item);
   }
+  // Sort groups: most store diversity first, then by item count
+  return [...map.values()].sort((a, b) => {
+    const aStores = new Set(a.items.map(i => i.source)).size;
+    const bStores = new Set(b.items.map(i => i.source)).size;
+    return bStores !== aStores ? bStores - aStores : b.items.length - a.items.length;
+  });
 }
 
 function dedup(items) {
   const seen = new Set();
   return items.filter(item => {
-    if (seen.has(item.mlId)) return false;
-    seen.add(item.mlId);
+    const k = itemKey(item);
+    if (seen.has(k)) return false;
+    seen.add(k);
     return true;
   });
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function SearchScreen({ navigation }) {
   const [query, setQuery]                   = useState('');
-  const [results, setResults]               = useState([]);
+  const [groups, setGroups]                 = useState([]);
   const [loading, setLoading]               = useState(true);
+  const [searching, setSearching]           = useState(false); // multi-retailer in progress
   const [selectedCategory, setSelectedCategory] = useState('Todo');
   const [isTextSearch, setIsTextSearch]     = useState(false);
   const [fetchError, setFetchError]         = useState(null);
-  const [addingId, setAddingId]             = useState(null);
-  const [modalVisible, setModalVisible]     = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [activeSources, setActiveSources]   = useState([]);
+
+  // Selection
+  const [selected, setSelected]             = useState(new Map());
+  const [addingBulk, setAddingBulk]         = useState(false);
+  const [showBulkModal, setShowBulkModal]   = useState(false);
+  const [showAlertStep, setShowAlertStep]   = useState(false);
+  const [bulkPrice, setBulkPrice]           = useState('');
+  const [resolvedIds, setResolvedIds]       = useState(new Map());
   const [successMsg, setSuccessMsg]         = useState('');
 
   useEffect(() => { loadCategory(CATEGORIES[0]); }, []);
 
+  function setResults(items, sources = []) {
+    const deduped = dedup(items);
+    setGroups(groupItems(deduped));
+    setActiveSources(sources.length ? sources : [...new Set(deduped.map(i => i.source))]);
+  }
+
+  // Category browsing — ML only (fast, ~2-3s)
   async function loadCategory(cat) {
     setLoading(true);
     setFetchError(null);
     setIsTextSearch(false);
     setSelectedCategory(cat.label);
     setQuery('');
+    setSelected(new Map());
+    setActiveSources([]);
     try {
-      // Try ML first for all category queries in parallel
-      const responses = await Promise.all(cat.queries.map(q => fetchQuery(q, 10)));
-      const items = dedup(responses.flat());
-      if (items.length === 0) {
-        const { data } = await supabase.from('products').select('*').gt('price', 0).limit(50);
-        setResults(data || []);
-      } else {
-        setResults(items);
-      }
-    } catch (e) {
-      const { data } = await supabase.from('products').select('*').gt('price', 0).limit(50);
-      setResults(data || []);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function search(overrideQuery) {
-    const q = (overrideQuery || query).trim();
-    if (!q) return;
-    setQuery(q);
-    setLoading(true);
-    setFetchError(null);
-    setIsTextSearch(true);
-    setResults([]);
-    try {
-      const items = await fetchQuery(q, 50);
-      setResults(items);
-    } catch (e) {
-      setFetchError(e.message || 'Error de conexión');
+      const responses = await Promise.allSettled(cat.queries.map(q => fetchML(q, 10)));
+      const all = responses.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+      setResults(all, ['MercadoLibre']);
+    } catch {
       setResults([]);
     } finally {
       setLoading(false);
     }
   }
 
-  async function addToList(product, listType) {
-    setAddingId(product.mlId);
-    setModalVisible(false);
+  // Text search — all retailers (slower, 10-25s, but real multi-store)
+  async function search(overrideQuery) {
+    const q = (overrideQuery || query).trim();
+    if (!q) return;
+    setQuery(q);
+    setLoading(true);
+    setSearching(true);
+    setFetchError(null);
+    setIsTextSearch(true);
+    setSelected(new Map());
+    setGroups([]);
+    setActiveSources([]);
+    try {
+      const results = await fetchMultiRetailer(q, 20);
+      if (results.length === 0) setFetchError('Sin resultados para "' + q + '"');
+      else setResults(results);
+    } catch (e) {
+      setFetchError('Error de conexión con el servidor');
+    } finally {
+      setLoading(false);
+      setSearching(false);
+    }
+  }
+
+  // ── Selection logic ───────────────────────────────────────────────────────
+  function toggleSelect(item) {
+    const k = itemKey(item);
+    setSelected(prev => {
+      const next = new Map(prev);
+      next.has(k) ? next.delete(k) : next.set(k, item);
+      return next;
+    });
+  }
+
+  // ── Bulk add to "Quiero comprar" ──────────────────────────────────────────
+  async function addBulkToList() {
+    setAddingBulk(true);
+    const resolved = new Map();
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      let productId = product.id;
-      if (!productId) {
-        const { data: existing } = await supabase
-          .from('products')
-          .select('id')
-          .eq('name', product.name)
-          .eq('store', 'MercadoLibre')
-          .maybeSingle();
+      for (const [k, product] of selected) {
+        const store = product.source || product.store || 'MercadoLibre';
+        let productId = product.id || null;
 
-        productId = existing?.id;
         if (!productId) {
-          const { data: newP } = await supabase
-            .from('products')
-            .insert({
-              name: product.name,
-              price: Math.round(product.price || 0),
-              image_url: product.image_url,
-              store: 'MercadoLibre',
-              brand: product.brand || '',
-              category: product.category || '',
-              image_emoji: '📦',
-            })
+          const { data: ex } = await supabase.from('products')
             .select('id')
-            .single();
-          productId = newP?.id;
+            .eq('name', product.name)
+            .eq('store', store)
+            .maybeSingle();
+          productId = ex?.id;
+
+          if (!productId) {
+            const { data: np } = await supabase.from('products').insert({
+              name:        product.name,
+              price:       Math.round(product.price || 0),
+              image_url:   product.imageUrl || product.image_url || null,
+              store,
+              brand:       product.brand || '',
+              category:    product.category || '',
+              image_emoji: '📦',
+            }).select('id').single();
+            productId = np?.id;
+          }
+        }
+
+        if (productId) {
+          await supabase.from('list_items').upsert(
+            { user_id: user.id, product_id: productId, list_type: 'want_to_buy' },
+            { onConflict: 'user_id,product_id,list_type' }
+          );
+          resolved.set(k, productId);
         }
       }
-
-      if (!productId) return;
-      await supabase.from('list_items').upsert(
-        { user_id: user.id, product_id: productId, list_type: listType },
-        { onConflict: 'user_id,product_id,list_type' }
-      );
-      setSuccessMsg('✓ Agregado a tu lista');
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (e) {
-      console.error('addToList error:', e);
-    } finally {
-      setAddingId(null);
-    }
+      setResolvedIds(resolved);
+      setShowAlertStep(true);
+    } catch (e) { console.error(e); }
+    finally { setAddingBulk(false); }
   }
 
-  const resultsLabel = isTextSearch
-    ? `${results.length} resultados para "${query}"`
-    : `${results.length} productos · ${selectedCategory}`;
+  // ── Price alerts for selected group ──────────────────────────────────────
+  async function saveAlerts() {
+    const price = parseInt(bulkPrice.replace(/\D/g, ''), 10);
+    if (price) {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          for (const [k] of selected) {
+            const productId = resolvedIds.get(k);
+            if (productId) {
+              await supabase.from('price_alerts').insert({
+                user_id: user.id, product_id: productId, target_price: price,
+              });
+            }
+          }
+        }
+      } catch (e) { console.error(e); }
+    }
+    closeModal();
+  }
 
+  function closeModal() {
+    const count = selected.size;
+    setShowBulkModal(false);
+    setShowAlertStep(false);
+    setSelected(new Map());
+    setBulkPrice('');
+    setResolvedIds(new Map());
+    setSuccessMsg(`✓ ${count} producto${count !== 1 ? 's' : ''} agregado${count !== 1 ? 's' : ''} a Quiero comprar`);
+    setTimeout(() => setSuccessMsg(''), 4000);
+  }
+
+  // ── Derived state ─────────────────────────────────────────────────────────
+  const inSelectionMode = selected.size > 0;
+  const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
+  const resultsLabel = isTextSearch
+    ? `${totalItems} resultados para "${query}"`
+    : `${totalItems} productos · ${selectedCategory}`;
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -196,7 +322,7 @@ export default function SearchScreen({ navigation }) {
         </TouchableOpacity>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar en todas las tiendas..."
+          placeholder="Buscar en Falabella, Paris, Ripley, ML..."
           value={query}
           onChangeText={setQuery}
           onSubmitEditing={() => search()}
@@ -209,10 +335,8 @@ export default function SearchScreen({ navigation }) {
 
       {/* Category chips */}
       <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipsScroll}
-        contentContainerStyle={styles.chipsContent}
+        horizontal showsHorizontalScrollIndicator={false}
+        style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}
       >
         {CATEGORIES.map(cat => (
           <TouchableOpacity
@@ -227,6 +351,21 @@ export default function SearchScreen({ navigation }) {
         ))}
       </ScrollView>
 
+      {/* Source badges (shown after text search) */}
+      {isTextSearch && activeSources.length > 0 && !loading && (
+        <View style={styles.sourcesRow}>
+          {activeSources.map(src => {
+            const s = storeStyle(src);
+            return (
+              <View key={src} style={[styles.sourceBadge, { backgroundColor: s.bg }]}>
+                <View style={[styles.sourceDot, { backgroundColor: s.color }]} />
+                <Text style={[styles.sourceBadgeText, { color: s.color }]}>{s.label}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
       {/* Toast */}
       {successMsg ? (
         <View style={styles.toast}><Text style={styles.toastText}>{successMsg}</Text></View>
@@ -235,139 +374,308 @@ export default function SearchScreen({ navigation }) {
       {/* Results */}
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.accent} size="large" />
-          <Text style={styles.loadingText}>Cargando productos...</Text>
+          <ActivityIndicator color="#D94F3D" size="large" />
+          <Text style={styles.loadingText}>
+            {searching
+              ? 'Buscando en Falabella, Paris, Ripley y MercadoLibre...'
+              : 'Cargando productos...'}
+          </Text>
+          {searching && <Text style={styles.loadingHint}>Esto puede tomar 10-20 segundos</Text>}
         </View>
-      ) : results.length === 0 ? (
+      ) : fetchError ? (
         <View style={styles.empty}>
-          {fetchError ? (
-            <>
-              <Text style={styles.emptyIcon}>⚠️</Text>
-              <Text style={styles.emptyTitle}>Error de conexión</Text>
-              <Text style={styles.emptyText}>{fetchError}</Text>
-            </>
-          ) : (
-            <>
-              <Text style={styles.emptyIcon}>🔍</Text>
-              <Text style={styles.emptyTitle}>Sin resultados</Text>
-              <Text style={styles.emptyText}>Intenta con otras palabras</Text>
-            </>
-          )}
+          <Text style={styles.emptyIcon}>🔍</Text>
+          <Text style={styles.emptyTitle}>Sin resultados</Text>
+          <Text style={styles.emptyText}>{fetchError}</Text>
+        </View>
+      ) : groups.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyIcon}>🔍</Text>
+          <Text style={styles.emptyTitle}>Sin resultados</Text>
+          <Text style={styles.emptyText}>Intenta con otras palabras</Text>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-          {/* Results count */}
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+          {/* Results header */}
           <View style={styles.resultsHeader}>
             <Text style={styles.resultsText}>{resultsLabel}</Text>
-            <View style={styles.mlBadge}><Text style={styles.mlBadgeText}>MercadoLibre</Text></View>
-          </View>
-          {/* Grid */}
-          <View style={styles.grid}>
-            {results.map((item, i) => (
-              <TouchableOpacity
-                key={item.mlId || i}
-                style={styles.card}
-                onPress={() => navigation.navigate('Product', { product: item })}
-                activeOpacity={0.8}
-              >
-                <View style={styles.cardImg}>
-                  {item.image_url
-                    ? <Image source={{ uri: item.image_url }} style={styles.cardImgPhoto} resizeMode="contain" />
-                    : <Text style={styles.cardEmoji}>📦</Text>
-                  }
-                </View>
-                <View style={styles.cardBody}>
-                  {item.brand ? <Text style={styles.cardBrand}>{item.brand.toUpperCase()}</Text> : null}
-                  <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
-                  <Text style={styles.cardPrice}>${item.price?.toLocaleString('es-CL')}</Text>
-                  <Text style={styles.cardCompare}>Comparar precios →</Text>
-                </View>
-                <TouchableOpacity
-                  style={[styles.addBtn, addingId === item.mlId && styles.addBtnLoading]}
-                  onPress={e => { e.stopPropagation(); setSelectedProduct(item); setModalVisible(true); }}
-                  disabled={addingId === item.mlId}
-                >
-                  {addingId === item.mlId
-                    ? <ActivityIndicator size="small" color="white" />
-                    : <Text style={styles.addBtnText}>+ Lista</Text>
-                  }
-                </TouchableOpacity>
+            {inSelectionMode && (
+              <TouchableOpacity onPress={() => setSelected(new Map())}>
+                <Text style={styles.clearText}>Limpiar</Text>
               </TouchableOpacity>
-            ))}
+            )}
           </View>
+
+          {/* Groups */}
+          {groups.map(group => {
+            const stores = [...new Set(group.items.map(i => i.source))];
+            return (
+              <View key={group.key} style={styles.groupSection}>
+
+                {/* Group header */}
+                <View style={styles.groupHeader}>
+                  <Text style={styles.groupTitle} numberOfLines={1}>{group.label}</Text>
+                  <View style={styles.groupMeta}>
+                    {stores.slice(0, 3).map(src => (
+                      <View
+                        key={src}
+                        style={[styles.groupStoreDot, { backgroundColor: storeStyle(src).color }]}
+                      />
+                    ))}
+                    <Text style={styles.groupCount}>
+                      {group.items.length} pub.
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Product cards */}
+                <View style={styles.grid}>
+                  {group.items.map(item => {
+                    const k = itemKey(item);
+                    const isSelected = selected.has(k);
+                    const s = storeStyle(item.source);
+                    return (
+                      <TouchableOpacity
+                        key={k}
+                        style={[styles.card, isSelected && styles.cardSelected]}
+                        onPress={() =>
+                          inSelectionMode
+                            ? toggleSelect(item)
+                            : navigation.navigate('Product', { product: toProductShape(item) })
+                        }
+                        activeOpacity={0.8}
+                      >
+                        {/* Checkbox */}
+                        <TouchableOpacity style={styles.checkboxWrap} onPress={() => toggleSelect(item)}>
+                          <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+                            {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                          </View>
+                        </TouchableOpacity>
+
+                        {/* Store badge */}
+                        <View style={[styles.storeBadge, { backgroundColor: s.bg }]}>
+                          <Text style={[styles.storeBadgeText, { color: s.color }]}>{s.label}</Text>
+                        </View>
+
+                        {/* Image */}
+                        <View style={styles.cardImg}>
+                          {item.imageUrl || item.image_url
+                            ? <Image
+                                source={{ uri: item.imageUrl || item.image_url }}
+                                style={styles.cardImgPhoto}
+                                resizeMode="contain"
+                              />
+                            : <Text style={styles.cardEmoji}>📦</Text>
+                          }
+                        </View>
+
+                        {/* Info */}
+                        <View style={styles.cardBody}>
+                          {item.brand ? (
+                            <Text style={styles.cardBrand}>{item.brand.toUpperCase()}</Text>
+                          ) : null}
+                          <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+                          <Text style={[styles.cardPrice, { color: s.color }]}>
+                            ${item.price?.toLocaleString('es-CL')}
+                          </Text>
+                          {item.originalPrice && item.originalPrice > item.price ? (
+                            <Text style={styles.cardOriginalPrice}>
+                              ${item.originalPrice?.toLocaleString('es-CL')}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        {/* Link button */}
+                        {item.permalink ? (
+                          <TouchableOpacity
+                            style={[styles.linkBtn, { borderColor: s.color }]}
+                            onPress={() => Linking.openURL(item.permalink)}
+                          >
+                            <Text style={[styles.linkBtnText, { color: s.color }]}>Ver →</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            );
+          })}
+
+          <View style={{ height: inSelectionMode ? 110 : 24 }} />
         </ScrollView>
       )}
 
-      {/* Add-to-list modal */}
-      <Modal visible={modalVisible} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} onPress={() => setModalVisible(false)}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Agregar a lista</Text>
-            <Text style={styles.modalProduct} numberOfLines={1}>{selectedProduct?.name}</Text>
-            {LISTS.map(list => (
-              <TouchableOpacity
-                key={list.key}
-                style={styles.listOption}
-                onPress={() => addToList(selectedProduct, list.key)}
-              >
-                <Text style={styles.listOptionText}>{list.label}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-              <Text style={styles.cancelBtnText}>Cancelar</Text>
-            </TouchableOpacity>
-          </View>
+      {/* Floating action bar */}
+      {selected.size > 0 && (
+        <View style={styles.floatBar}>
+          <Text style={styles.floatCount}>
+            {selected.size} seleccionado{selected.size !== 1 ? 's' : ''}
+          </Text>
+          <TouchableOpacity style={styles.floatBtn} onPress={() => setShowBulkModal(true)}>
+            <Text style={styles.floatBtnText}>🛍️ Agregar a Quiero comprar</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Bulk modal — 2 steps: confirm → price alert */}
+      <Modal visible={showBulkModal} transparent animationType="slide">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1}>
+          <TouchableOpacity activeOpacity={1} style={styles.modalBox}>
+            {!showAlertStep ? (
+              <>
+                <Text style={styles.modalTitle}>🛍️ Quiero comprar</Text>
+                <Text style={styles.modalSub}>
+                  Agregarás {selected.size} producto{selected.size !== 1 ? 's' : ''} a tu lista
+                </Text>
+                {/* Preview of selected stores */}
+                <View style={styles.selectedStores}>
+                  {[...new Set([...selected.values()].map(p => p.source))].map(src => {
+                    const s = storeStyle(src);
+                    return (
+                      <View key={src} style={[styles.sourceBadge, { backgroundColor: s.bg }]}>
+                        <View style={[styles.sourceDot, { backgroundColor: s.color }]} />
+                        <Text style={[styles.sourceBadgeText, { color: s.color }]}>{s.label}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+                <TouchableOpacity style={styles.btnPrimary} onPress={addBulkToList} disabled={addingBulk}>
+                  {addingBulk
+                    ? <ActivityIndicator color="white" />
+                    : <Text style={styles.btnPrimaryText}>Confirmar</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowBulkModal(false)}>
+                  <Text style={styles.cancelBtnText}>Cancelar</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>🔔 Alerta de precio</Text>
+                <Text style={styles.modalSub}>
+                  Avisame si cualquiera de estos {selected.size} productos baja de:
+                </Text>
+                <View style={styles.priceInputWrap}>
+                  <Text style={styles.pricePrefix}>$</Text>
+                  <TextInput
+                    style={styles.priceInput}
+                    value={bulkPrice}
+                    onChangeText={setBulkPrice}
+                    keyboardType="numeric"
+                    placeholder="0"
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[styles.btnPrimary, !bulkPrice && { opacity: 0.5 }]}
+                  onPress={saveAlerts}
+                  disabled={!bulkPrice}
+                >
+                  <Text style={styles.btnPrimaryText}>Activar alertas</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cancelBtn} onPress={closeModal}>
+                  <Text style={styles.cancelBtnText}>Omitir</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: '#FAFAF7' },
-  header:          { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 56, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
-  backBtn:         { padding: 4 },
-  backText:        { fontSize: 22, color: '#1A1A18' },
-  searchInput:     { flex: 1, backgroundColor: '#FAFAF7', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1.5, borderColor: '#E8E8E2', fontSize: 15 },
-  searchBtn:       { backgroundColor: '#D94F3D', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
-  searchBtnText:   { color: 'white', fontWeight: '700', fontSize: 14 },
-  chipsScroll:     { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2', flexGrow: 0 },
-  chipsContent:    { paddingHorizontal: 16, paddingVertical: 10, gap: 8, flexDirection: 'row' },
-  chip:            { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 100, borderWidth: 1.5, borderColor: '#E8E8E2', backgroundColor: '#FFFFFF' },
-  chipActive:      { backgroundColor: '#1A1A18', borderColor: '#1A1A18' },
-  chipText:        { fontSize: 13, color: '#8A8A82', fontWeight: '500' },
-  chipTextActive:  { color: '#FFFFFF', fontWeight: '600' },
-  toast:           { backgroundColor: '#1A1A18', margin: 16, borderRadius: 12, padding: 14, alignItems: 'center' },
-  toastText:       { color: 'white', fontWeight: '600', fontSize: 14 },
-  center:          { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
-  loadingText:     { fontSize: 14, color: '#8A8A82' },
-  empty:           { alignItems: 'center', paddingTop: 80 },
-  emptyIcon:       { fontSize: 48, marginBottom: 12 },
-  emptyTitle:      { fontSize: 18, fontWeight: '700', color: '#1A1A18', marginBottom: 6 },
-  emptyText:       { fontSize: 14, color: '#8A8A82' },
-  list:            { padding: 16, gap: 10 },
-  resultsHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  resultsText:     { fontSize: 13, color: '#8A8A82', flex: 1 },
-  mlBadge:         { backgroundColor: '#FEF9E8', borderRadius: 100, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#E8A020' },
-  mlBadgeText:     { fontSize: 11, color: '#E8A020', fontWeight: '600' },
-  card:            { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#E8E8E2', shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
-  productImage:    { width: 60, height: 60, borderRadius: 12, backgroundColor: '#F0EFE8', flexShrink: 0 },
-  emojiWrap:       { width: 60, height: 60, borderRadius: 12, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  emojiText:       { fontSize: 28 },
-  info:            { flex: 1, minWidth: 0 },
-  brand:           { fontSize: 10, color: '#8A8A82', letterSpacing: 0.5, marginBottom: 2 },
-  name:            { fontSize: 14, fontWeight: '600', color: '#1A1A18', marginBottom: 4 },
-  price:           { fontSize: 16, fontWeight: '700', color: '#D94F3D', marginBottom: 2 },
-  storeTag:        { fontSize: 12, color: '#3D7DD9', fontWeight: '500' },
-  addBtn:          { backgroundColor: '#D94F3D', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, minWidth: 60, alignItems: 'center', flexShrink: 0 },
-  addBtnLoading:   { opacity: 0.7 },
-  addBtnText:      { color: 'white', fontWeight: '600', fontSize: 13 },
-  modalOverlay:    { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalBox:        { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, margin: 16, gap: 10 },
-  modalTitle:      { fontSize: 18, fontWeight: '700', color: '#1A1A18' },
-  modalProduct:    { fontSize: 13, color: '#8A8A82', marginBottom: 4 },
-  listOption:      { backgroundColor: '#FAFAF7', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E8E2' },
-  listOptionText:  { fontSize: 15, fontWeight: '500', color: '#1A1A18' },
-  cancelBtn:       { padding: 14, alignItems: 'center' },
-  cancelBtnText:   { fontSize: 15, color: '#8A8A82' },
+  container:        { flex: 1, backgroundColor: '#FAFAF7' },
+
+  // Header
+  header:           { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 56, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
+  backBtn:          { padding: 4 },
+  backText:         { fontSize: 22, color: '#1A1A18' },
+  searchInput:      { flex: 1, backgroundColor: '#FAFAF7', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1.5, borderColor: '#E8E8E2', fontSize: 14 },
+  searchBtn:        { backgroundColor: '#D94F3D', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  searchBtnText:    { color: 'white', fontWeight: '700', fontSize: 14 },
+
+  // Chips
+  chipsScroll:      { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2', flexGrow: 0 },
+  chipsContent:     { paddingHorizontal: 16, paddingVertical: 10, gap: 8, flexDirection: 'row' },
+  chip:             { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 100, borderWidth: 1.5, borderColor: '#E8E8E2', backgroundColor: '#FFFFFF' },
+  chipActive:       { backgroundColor: '#1A1A18', borderColor: '#1A1A18' },
+  chipText:         { fontSize: 13, color: '#8A8A82', fontWeight: '500' },
+  chipTextActive:   { color: '#FFFFFF', fontWeight: '600' },
+
+  // Source badges row
+  sourcesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
+  sourceBadge:      { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 100 },
+  sourceDot:        { width: 7, height: 7, borderRadius: 4 },
+  sourceBadgeText:  { fontSize: 11, fontWeight: '600' },
+
+  // Toast
+  toast:            { backgroundColor: '#1A1A18', margin: 16, borderRadius: 12, padding: 14, alignItems: 'center' },
+  toastText:        { color: 'white', fontWeight: '600', fontSize: 14 },
+
+  // States
+  center:           { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  loadingText:      { fontSize: 14, color: '#8A8A82', textAlign: 'center', paddingHorizontal: 24 },
+  loadingHint:      { fontSize: 12, color: '#B0AFA8', textAlign: 'center' },
+  empty:            { alignItems: 'center', paddingTop: 80 },
+  emptyIcon:        { fontSize: 48, marginBottom: 12 },
+  emptyTitle:       { fontSize: 18, fontWeight: '700', color: '#1A1A18', marginBottom: 6 },
+  emptyText:        { fontSize: 14, color: '#8A8A82', textAlign: 'center', paddingHorizontal: 32 },
+
+  // Scroll
+  scrollContent:    { padding: 16, paddingBottom: 24 },
+  resultsHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  resultsText:      { fontSize: 13, color: '#8A8A82' },
+  clearText:        { fontSize: 13, color: '#D94F3D', fontWeight: '600' },
+
+  // Groups
+  groupSection:     { marginBottom: 28 },
+  groupHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
+  groupTitle:       { fontSize: 15, fontWeight: '700', color: '#1A1A18', flex: 1, marginRight: 8 },
+  groupMeta:        { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  groupStoreDot:    { width: 8, height: 8, borderRadius: 4 },
+  groupCount:       { fontSize: 11, color: '#8A8A82', marginLeft: 2 },
+
+  // Cards
+  grid:             { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  card:             { width: CARD_W, backgroundColor: '#FFFFFF', borderRadius: 16, overflow: 'hidden', borderWidth: 1.5, borderColor: '#E8E8E2' },
+  cardSelected:     { borderColor: '#D94F3D', backgroundColor: '#FFF8F7' },
+  checkboxWrap:     { position: 'absolute', top: 8, left: 8, zIndex: 10, padding: 4 },
+  checkbox:         { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#D0CFC8', backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' },
+  checkboxChecked:  { backgroundColor: '#D94F3D', borderColor: '#D94F3D' },
+  checkmark:        { color: 'white', fontSize: 11, fontWeight: '800' },
+  storeBadge:       { position: 'absolute', top: 8, right: 8, zIndex: 10, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6 },
+  storeBadgeText:   { fontSize: 9, fontWeight: '700', letterSpacing: 0.2 },
+  cardImg:          { width: '100%', aspectRatio: 1, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center' },
+  cardImgPhoto:     { width: '100%', height: '100%' },
+  cardEmoji:        { fontSize: 44 },
+  cardBody:         { padding: 10 },
+  cardBrand:        { fontSize: 9, color: '#8A8A82', letterSpacing: 0.5, marginBottom: 2 },
+  cardName:         { fontSize: 12, fontWeight: '600', color: '#1A1A18', marginBottom: 5, lineHeight: 17 },
+  cardPrice:        { fontSize: 16, fontWeight: '800', marginBottom: 1 },
+  cardOriginalPrice:{ fontSize: 11, color: '#B0AFA8', textDecorationLine: 'line-through' },
+  linkBtn:          { margin: 8, marginTop: 0, borderWidth: 1.5, borderRadius: 8, paddingVertical: 6, alignItems: 'center' },
+  linkBtnText:      { fontSize: 12, fontWeight: '600' },
+
+  // Float bar
+  floatBar:         { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 30, backgroundColor: '#1A1A18', gap: 12 },
+  floatCount:       { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontWeight: '500' },
+  floatBtn:         { flex: 1, backgroundColor: '#D94F3D', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  floatBtnText:     { color: 'white', fontWeight: '700', fontSize: 14 },
+
+  // Modal
+  modalOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalBox:         { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, margin: 16, gap: 12 },
+  modalTitle:       { fontSize: 18, fontWeight: '700', color: '#1A1A18' },
+  modalSub:         { fontSize: 14, color: '#8A8A82', lineHeight: 20 },
+  selectedStores:   { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  priceInputWrap:   { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#E8E8E2', borderRadius: 14, paddingHorizontal: 16 },
+  pricePrefix:      { fontSize: 24, fontWeight: '700', color: '#8A8A82', marginRight: 4 },
+  priceInput:       { flex: 1, fontSize: 32, fontWeight: '700', color: '#1A1A18', paddingVertical: 14 },
+  btnPrimary:       { backgroundColor: '#D94F3D', borderRadius: 14, padding: 16, alignItems: 'center' },
+  btnPrimaryText:   { color: 'white', fontSize: 16, fontWeight: '700' },
+  cancelBtn:        { padding: 14, alignItems: 'center' },
+  cancelBtnText:    { fontSize: 15, color: '#8A8A82' },
 });
