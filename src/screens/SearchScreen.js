@@ -25,13 +25,13 @@ function storeStyle(source) {
 
 // ── Category browsing (ML only, fast) ────────────────────────────────────────
 const CATEGORIES = [
-  { label: 'Todo',        queries: ['tecnologia', 'zapatillas', 'hogar'] },
-  { label: 'Tecnología',  queries: ['smartphone iphone samsung', 'laptop notebook', 'audifonos airpods'] },
-  { label: 'Moda',        queries: ['zapatillas nike adidas', 'ropa mujer', 'ropa hombre'] },
-  { label: 'Hogar',       queries: ['cafetera nespresso', 'electrodomesticos cocina', 'decoracion hogar'] },
-  { label: 'Deportes',    queries: ['bicicleta', 'ropa deportiva', 'suplementos proteina'] },
-  { label: 'Belleza',     queries: ['perfume', 'maquillaje', 'cuidado piel'] },
-  { label: 'Juguetes',    queries: ['lego', 'juguetes niños', 'consola videojuegos'] },
+  { label: 'Todo',        queries: ['iphone', 'zapatillas nike', 'perfume mujer'] },
+  { label: 'Tecnología',  queries: ['iphone apple', 'samsung galaxy', 'airpods audifonos'] },
+  { label: 'Moda',        queries: ['zapatillas nike', 'zapatillas adidas', 'ropa mujer'] },
+  { label: 'Hogar',       queries: ['cafetera nespresso', 'robot aspirador', 'airfryer'] },
+  { label: 'Deportes',    queries: ['bicicleta montana', 'ropa deportiva', 'proteina whey'] },
+  { label: 'Belleza',     queries: ['perfume mujer', 'perfume hombre', 'serum vitamina c'] },
+  { label: 'Juguetes',    queries: ['lego', 'hot wheels', 'nintendo switch'] },
 ];
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
@@ -45,23 +45,28 @@ async function fetchMultiRetailer(q, limit = 20) {
   return res.data?.results || [];
 }
 
-// ML-only search (for fast category browsing)
+// ML-only search — calls MercadoLibre API directly from the browser.
+// The ML public API supports CORS, so no server proxy needed for browsing.
 async function fetchML(q, limit = 10) {
-  const res = await axios.get(`${SERVER_URL}/search/ml`, {
-    params: { q, limit },
-    timeout: 10000,
+  const { data } = await axios.get('https://api.mercadolibre.com/sites/MLC/search', {
+    params: { q, limit: Math.min(limit, 50) },
+    timeout: 8000,
   });
-  return (res.data?.results || []).map(item => ({
-    // Server v2 already normalizes, but handle old format too
-    externalId: item.externalId || item.id,
-    source:     item.source || item.store || 'MercadoLibre',
-    name:       item.name,
-    price:      item.price,
-    imageUrl:   item.imageUrl || item.image_url,
-    permalink:  item.permalink,
-    brand:      item.brand || '',
-    currency:   'CLP',
-  }));
+  return (data.results || [])
+    .filter(item => item.condition !== 'used')
+    .map(item => ({
+      externalId:    item.id,
+      source:        'MercadoLibre',
+      name:          String(item.title || '').trim().substring(0, 250),
+      price:         Math.round(item.price || 0),
+      originalPrice: item.original_price && item.original_price > item.price
+        ? Math.round(item.original_price) : null,
+      imageUrl:      item.thumbnail?.replace(/-[A-Z]\.jpg$/, '-O.jpg') || null,
+      permalink:     item.permalink || null,
+      brand:         item.attributes?.find(a => a.id === 'BRAND')?.value_name?.trim() || '',
+      currency:      'CLP',
+    }))
+    .filter(p => p.name && p.price > 0);
 }
 
 // Unified item key across all sources
@@ -378,9 +383,7 @@ export default function SearchScreen({ navigation }) {
         <View style={styles.center}>
           <ActivityIndicator color="#D94F3D" size="large" />
           <Text style={styles.loadingText}>
-            {searching
-              ? 'Buscando en MercadoLibre y Amazon...'
-              : 'Cargando productos...'}
+            {searching ? 'Buscando en MercadoLibre y Amazon...' : 'Cargando productos...'}
           </Text>
           {searching && <Text style={styles.loadingHint}>Esto puede tomar unos segundos</Text>}
         </View>
