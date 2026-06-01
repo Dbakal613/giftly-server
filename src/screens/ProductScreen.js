@@ -36,14 +36,29 @@ export default function ProductScreen({ route, navigation }) {
       if (!user) return;
       let productId = product.id;
       if (!productId) {
-        const { data: existing } = await supabase.from('products').select('id').eq('name', product.name).eq('store', product.store || '').single();
+        const { data: existing } = await supabase.from('products')
+          .select('id').eq('name', product.name).eq('store', product.store || '').maybeSingle();
         productId = existing?.id;
         if (!productId) {
-          const { data: newP } = await supabase.from('products').insert({ name: product.name, brand: product.brand, store: product.store, price: Math.round(product.price || 0), image_emoji: product.image_emoji, image_url: product.image_url, category: product.category }).select('id').single();
+          const { data: newP, error: insertErr } = await supabase.from('products').insert({
+            name:        product.name,
+            brand:       product.brand || '',
+            store:       product.store || '',
+            price:       Math.round(product.price || 0),
+            image_emoji: product.image_emoji || '📦',
+            image_url:   product.image_url || null,
+            category:    product.category || '',
+          }).select('id').single();
+          if (insertErr) throw new Error('No se pudo guardar el producto: ' + insertErr.message);
           productId = newP?.id;
         }
       }
-      await supabase.from('list_items').upsert({ user_id: user.id, product_id: productId, list_type: listType }, { onConflict: 'user_id,product_id,list_type' });
+      if (!productId) throw new Error('No se pudo obtener el ID del producto');
+      const { error: listErr } = await supabase.from('list_items').upsert(
+        { user_id: user.id, product_id: productId, list_type: listType },
+        { onConflict: 'user_id,product_id,list_type' }
+      );
+      if (listErr) throw new Error('No se pudo agregar a la lista: ' + listErr.message);
       if (listType === 'recommend') {
         setReviewProductId(productId);
         setReviewRating(0);
@@ -52,7 +67,10 @@ export default function ProductScreen({ route, navigation }) {
       } else {
         showToast('✓ Agregado a tu lista');
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      showToast('Error: ' + e.message);
+    }
     finally { setAdding(false); }
   }
 

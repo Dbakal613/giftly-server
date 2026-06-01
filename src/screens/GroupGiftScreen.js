@@ -57,6 +57,7 @@ export default function GroupGiftScreen({ route, navigation }) {
   const [loading, setLoading]           = useState(false);
   const [created, setCreated]           = useState(false);
   const [createdGiftId, setCreatedGiftId] = useState(null);
+  const [createError, setCreateError]   = useState('');
 
   useEffect(() => { init(); }, []);
 
@@ -230,25 +231,34 @@ export default function GroupGiftScreen({ route, navigation }) {
     if (!recipientName) return;
     if (!occasion)      return;
     setLoading(true);
+    setCreateError('');
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
       let productId = initialProduct?.id;
       if (!productId && initialProduct) {
-        const { data: newP } = await supabase.from('products')
+        const { data: newP, error: prodErr } = await supabase.from('products')
           .insert({
-            name: initialProduct.name, brand: initialProduct.brand,
-            store: initialProduct.store, price: Math.round(initialProduct.price || 0),
-            image_emoji: initialProduct.image_emoji, category: initialProduct.category,
+            name:        initialProduct.name,
+            brand:       initialProduct.brand || '',
+            store:       initialProduct.store || '',
+            price:       Math.round(initialProduct.price || 0),
+            image_emoji: initialProduct.image_emoji || '📦',
+            image_url:   initialProduct.image_url || null,
+            category:    initialProduct.category || '',
           }).select('id').single();
-        productId = newP?.id;
+        if (prodErr) {
+          console.error('product insert error:', prodErr.message);
+        } else {
+          productId = newP?.id;
+        }
       }
 
       const { data: gift, error } = await supabase.from('group_gifts').insert({
         creator_id:     user.id,
         recipient_name: recipientName,
-        product_id:     productId,
+        product_id:     productId || null,
         occasion:       occasion.replace(/^[^ ]+ /, ''),
         message,
         status:         'active',
@@ -267,7 +277,10 @@ export default function GroupGiftScreen({ route, navigation }) {
 
       setCreated(true);
       setStep(3);
-    } catch (e) { console.error('createGift error:', e); }
+    } catch (e) {
+      console.error('createGift error:', e);
+      setCreateError(e.message || 'Error al crear el regalo. Intenta de nuevo.');
+    }
     finally { setLoading(false); }
   }
 
@@ -746,6 +759,11 @@ export default function GroupGiftScreen({ route, navigation }) {
               )}
             </View>
 
+            {createError ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.errorText}>{createError}</Text>
+              </View>
+            ) : null}
             <TouchableOpacity
               style={[styles.btnPrimary, loading && { opacity: 0.6 }]}
               onPress={createGift}
@@ -868,6 +886,8 @@ const styles = StyleSheet.create({
   createSummaryTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A18', marginBottom: 4 },
   createSummaryItem:  { fontSize: 14, color: '#8A8A82' },
 
+  errorBox:           { backgroundColor: '#FDE8E5', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#F5C0BB' },
+  errorText:          { color: '#D94F3D', fontSize: 13, fontWeight: '500', textAlign: 'center' },
   btnPrimary:         { backgroundColor: '#D94F3D', borderRadius: 14, padding: 16, alignItems: 'center' },
   btnPrimaryText:     { color: 'white', fontSize: 16, fontWeight: '700' },
   cancelBtn:          { padding: 14, alignItems: 'center' },
