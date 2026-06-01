@@ -79,25 +79,44 @@ export default function GroupGiftScreen({ route, navigation }) {
 
   async function fetchGiftData() {
     setLoadingGift(true);
-    const { data } = await supabase
+
+    // Fetch gift + product in one query
+    const { data: giftRaw, error: giftErr } = await supabase
       .from('group_gifts')
-      .select(`*, products(id, name, image_emoji, image_url, price, store, brand),
-        group_gift_members(id, amount, status, joined_at, user_id)`)
+      .select(`*, products(id, name, image_emoji, image_url, price, store, brand)`)
       .eq('id', giftId)
       .single();
 
-    if (!data) { setGiftData(null); setLoadingGift(false); return; }
+    if (giftErr || !giftRaw) {
+      console.error('fetchGiftData error:', giftErr?.message, '| code:', giftErr?.code);
+      setGiftData(null);
+      setLoadingGift(false);
+      return;
+    }
 
-    // Fetch member profiles separately to avoid FK constraint name issues
-    const memberIds = (data.group_gift_members || []).map(m => m.user_id);
+    // Fetch members separately to avoid FK constraint name issues
+    const { data: membersRaw } = await supabase
+      .from('group_gift_members')
+      .select('id, amount, status, joined_at, user_id')
+      .eq('group_gift_id', giftId);
+
+    const members = membersRaw || [];
+
+    // Fetch member profiles separately
+    const memberIds = members.map(m => m.user_id);
+    let profilesById = {};
     if (memberIds.length) {
       const { data: profiles } = await supabase
         .from('profiles').select('id, name, username').in('id', memberIds);
-      const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
-      data.group_gift_members = data.group_gift_members.map(m => ({
-        ...m, profiles: byId[m.user_id] || null,
-      }));
+      profilesById = Object.fromEntries((profiles || []).map(p => [p.id, p]));
     }
+
+    const data = {
+      ...giftRaw,
+      group_gift_members: members.map(m => ({
+        ...m, profiles: profilesById[m.user_id] || null,
+      })),
+    };
 
     setGiftData(data);
     setLoadingGift(false);
@@ -314,6 +333,15 @@ export default function GroupGiftScreen({ route, navigation }) {
           </View>
           <View style={styles.center}>
             <Text style={styles.emptyText}>No se pudo cargar el regalo.</Text>
+            <Text style={[styles.emptyText, { fontSize: 12, marginTop: 8, color: '#D94F3D' }]}>
+              Revisa la consola para ver el error exacto.
+            </Text>
+            <TouchableOpacity
+              style={{ marginTop: 16, backgroundColor: '#D94F3D', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 10 }}
+              onPress={() => fetchGiftData()}
+            >
+              <Text style={{ color: 'white', fontWeight: '600' }}>Reintentar</Text>
+            </TouchableOpacity>
           </View>
         </View>
       );
