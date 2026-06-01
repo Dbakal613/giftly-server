@@ -15,8 +15,18 @@ import FriendProfileScreen from '../screens/FriendProfileScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import PriceAlertsScreen from '../screens/PriceAlertsScreen';
 import GroupGiftScreen from '../screens/GroupGiftScreen';
+import PublicGiftScreen from '../screens/PublicGiftScreen';
 
 const Stack = createNativeStackNavigator();
+
+const linking = {
+  prefixes: [],
+  config: {
+    screens: {
+      PublicGift: 'gift/:giftId',
+    },
+  },
+};
 
 export default function AppNavigator() {
   const [session, setSession]               = useState(null);
@@ -78,12 +88,13 @@ export default function AppNavigator() {
     </View>
   );
 
-  // Not logged in
+  // Not logged in — include PublicGift so share links work without auth
   if (!session) {
     return (
-      <NavigationContainer>
+      <NavigationContainer linking={linking}>
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="PublicGift" component={PublicGiftScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     );
@@ -96,7 +107,7 @@ export default function AppNavigator() {
 
   // Logged in + onboarding done
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Search" component={SearchScreen} />
@@ -107,6 +118,7 @@ export default function AppNavigator() {
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
         <Stack.Screen name="PriceAlerts" component={PriceAlertsScreen} />
         <Stack.Screen name="GroupGift" component={GroupGiftScreen} />
+        <Stack.Screen name="PublicGift" component={PublicGiftScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

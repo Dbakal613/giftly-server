@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator, Modal, FlatList
+  TextInput, ActivityIndicator, Modal, FlatList, Platform, Share,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { createNotification } from '../lib/notificationHelpers';
@@ -125,6 +125,29 @@ export default function GroupGiftScreen({ route, navigation }) {
   function showToastMsg(msg) {
     setToast(msg);
     setTimeout(() => setToast(''), 3500);
+  }
+
+  async function shareGift() {
+    const base = typeof window !== 'undefined'
+      ? window.location.origin
+      : 'https://giftly-server.vercel.app';
+    const url = `${base}/gift/${giftId}`;
+    const msg = `¡Únete al regalo grupal para ${giftData?.recipient_name || 'alguien especial'}! 🎁\n${url}`;
+
+    if (Platform.OS === 'web') {
+      try {
+        await navigator.clipboard.writeText(url);
+        showToastMsg('✓ Link copiado al portapapeles');
+      } catch {
+        showToastMsg(url);
+      }
+    } else {
+      try {
+        await Share.share({ message: msg, url });
+      } catch (e) {
+        console.warn('share error:', e);
+      }
+    }
   }
 
   // ── Management: invites ───────────────────────────────────────────────────────
@@ -365,9 +388,12 @@ export default function GroupGiftScreen({ route, navigation }) {
             <Text style={styles.backText}>←</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Regalo grupal 🎁</Text>
+          <TouchableOpacity onPress={shareGift} style={styles.shareBtn}>
+            <Text style={styles.shareBtnText}>🔗 Compartir</Text>
+          </TouchableOpacity>
           {isCreator && (
             <TouchableOpacity onPress={openEdit} style={styles.editBtn}>
-              <Text style={styles.editBtnText}>✏️ Editar</Text>
+              <Text style={styles.editBtnText}>✏️</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -820,7 +846,9 @@ const styles = StyleSheet.create({
   backBtn:            { padding: 4 },
   backText:           { fontSize: 22, color: '#1A1A18' },
   headerTitle:        { flex: 1, fontSize: 17, fontWeight: '700', color: '#1A1A18' },
-  editBtn:            { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 100, borderWidth: 1.5, borderColor: '#E8E8E2' },
+  shareBtn:           { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, backgroundColor: '#D94F3D' },
+  shareBtnText:       { fontSize: 12, color: 'white', fontWeight: '700' },
+  editBtn:            { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 100, borderWidth: 1.5, borderColor: '#E8E8E2', marginLeft: 6 },
   editBtnText:        { fontSize: 13, color: '#1A1A18', fontWeight: '500' },
 
   toast:              { backgroundColor: '#1A1A18', margin: 16, borderRadius: 12, padding: 13, alignItems: 'center' },
