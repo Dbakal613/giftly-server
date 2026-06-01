@@ -1,10 +1,12 @@
-// Server URL for the Giftly Express backend
-//
-// Development:
-//   iOS Simulator  →  http://localhost:3001
-//   Android Emu    →  http://10.0.2.2:3001
-//   Physical device (Expo Go) → http://YOUR_LOCAL_IP:3001  (e.g. http://192.168.1.42:3001)
-//
-// Production: replace with your deployed server URL (Railway, Render, etc.)
+import { Platform } from 'react-native';
 
-export const SERVER_URL = 'http://localhost:3001';
+function resolveServerUrl() {
+  if (Platform.OS !== 'web') return 'http://localhost:3001';
+  if (typeof window === 'undefined') return 'http://localhost:3001';
+  const { hostname } = window.location;
+  // On Vercel (or any non-localhost host), use the same-origin /api functions
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') return '/api';
+  return 'http://localhost:3001';
+}
+
+export const SERVER_URL = resolveServerUrl();

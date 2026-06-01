@@ -69,14 +69,42 @@ export default function LoginScreen() {
     try {
       if (mode === 'login') {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (error) throw error;
+        if (error) {
+          if (error.message.toLowerCase().includes('invalid login') ||
+              error.message.toLowerCase().includes('invalid credentials')) {
+            setError('Email o contraseña incorrectos');
+          } else {
+            setError(error.message || 'Ocurrió un error');
+          }
+          return;
+        }
       } else {
-        const { error } = await supabase.auth.signUp({
+        const redirectTo = Platform.OS === 'web' && typeof window !== 'undefined'
+          ? window.location.origin
+          : undefined;
+
+        const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { name: name.trim(), username } },
+          options: {
+            data: { name: name.trim(), username },
+            ...(redirectTo ? { emailRedirectTo: redirectTo } : {}),
+          },
         });
-        if (error) throw error;
+        if (error) {
+          if (error.message.toLowerCase().includes('already registered') ||
+              error.message.toLowerCase().includes('already been registered')) {
+            setError('Este email ya está registrado. Intenta iniciar sesión.');
+          } else {
+            setError(error.message || 'Ocurrió un error');
+          }
+          return;
+        }
+        // Supabase obfuscates duplicate emails — empty identities array is the tell
+        if (data.user?.identities?.length === 0) {
+          setError('Este email ya está registrado. Intenta iniciar sesión.');
+          return;
+        }
         setSuccess('¡Revisa tu email para confirmar tu cuenta!');
       }
     } catch (e) {
