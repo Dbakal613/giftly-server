@@ -68,11 +68,36 @@ export default function HomeScreen({ navigation }) {
   }
 
   async function fetchGroupGifts(uid) {
-    const { data } = await supabase.from('group_gifts')
-      .select('*, products(name, image_emoji, image_url, price), group_gift_members(amount, status)')
+    const SELECT = '*, products(name, image_emoji, image_url, price), group_gift_members(amount, status, user_id)';
+
+    // Gifts I created
+    const { data: created } = await supabase.from('group_gifts')
+      .select(SELECT)
       .eq('creator_id', uid).eq('status', 'active')
-      .order('created_at', { ascending: false }).limit(3);
-    setGroupGifts(data || []);
+      .order('created_at', { ascending: false }).limit(5);
+
+    // Gift IDs where I'm a member (but not creator)
+    const { data: memberRows } = await supabase.from('group_gift_members')
+      .select('group_gift_id')
+      .eq('user_id', uid)
+      .in('status', ['pending', 'paid', 'accepted']);
+
+    const createdIds  = new Set((created || []).map(g => g.id));
+    const memberGiftIds = (memberRows || [])
+      .map(r => r.group_gift_id)
+      .filter(id => !createdIds.has(id));
+
+    let memberGifts = [];
+    if (memberGiftIds.length > 0) {
+      const { data } = await supabase.from('group_gifts')
+        .select(SELECT)
+        .in('id', memberGiftIds)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(5);
+      memberGifts = data || [];
+    }
+
+    setGroupGifts([...(created || []), ...memberGifts].slice(0, 6));
   }
 
   async function fetchItems() {
@@ -165,7 +190,7 @@ export default function HomeScreen({ navigation }) {
             {groupGifts.map(gift => {
               const { paid, total, pct } = getGiftProgress(gift);
               return (
-                <TouchableOpacity key={gift.id} style={styles.giftCard} onPress={() => navigation.navigate('GroupGift', { gift })}>
+                <TouchableOpacity key={gift.id} style={styles.giftCard} onPress={() => navigation.navigate('GroupGift', { giftId: gift.id })}>
                   <View style={styles.giftTop}>
                     <View style={styles.giftEmoji}>
                       <Text style={{ fontSize: 22 }}>{gift.products?.image_emoji || '🎁'}</Text>

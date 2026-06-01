@@ -14,13 +14,26 @@ const LISTS = [
 
 export default function FriendProfileScreen({ route, navigation }) {
   const { profile } = route.params;
-  const [activeList, setActiveList]   = useState('want_to_buy');
-  const [items, setItems]             = useState([]);
-  const [counts, setCounts]           = useState({});
-  const [loading, setLoading]         = useState(true);
+  const [activeList, setActiveList]     = useState('want_to_buy');
+  const [items, setItems]               = useState([]);
+  const [counts, setCounts]             = useState({});
+  const [loading, setLoading]           = useState(true);
+  const [friendProfile, setFriendProfile] = useState(profile);
+  const [isPrivate, setIsPrivate]       = useState(false);
 
-  useEffect(() => { fetchCounts(); }, []);
-  useEffect(() => { fetchItems(); }, [activeList]);
+  useEffect(() => {
+    fetchFriendProfile().then(() => fetchCounts());
+  }, []);
+  useEffect(() => { fetchItems(); }, [activeList, friendProfile]);
+
+  async function fetchFriendProfile() {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, name, username, list_visibility, profile_visibility')
+      .eq('id', profile.id)
+      .maybeSingle();
+    if (data) setFriendProfile(data);
+  }
 
   async function fetchCounts() {
     const newCounts = {};
@@ -37,6 +50,16 @@ export default function FriendProfileScreen({ route, navigation }) {
 
   async function fetchItems() {
     setLoading(true);
+
+    const listVis = friendProfile?.list_visibility?.[activeList] || 'public';
+    if (listVis === 'private') {
+      setIsPrivate(true);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    setIsPrivate(false);
+
     const { data } = await supabase
       .from('list_items')
       .select('id, list_type, added_at, products(id, name, brand, category, image_emoji, image_url, price, store)')
@@ -99,6 +122,12 @@ export default function FriendProfileScreen({ route, navigation }) {
       {/* Products */}
       {loading ? (
         <View style={styles.center}><ActivityIndicator color="#D94F3D" /></View>
+      ) : isPrivate ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyIcon}>🔒</Text>
+          <Text style={styles.emptyTitle}>Lista privada</Text>
+          <Text style={styles.emptyText}>{displayName} mantiene esta lista solo para sí mism@</Text>
+        </View>
       ) : items.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>{activeListData.icon}</Text>
