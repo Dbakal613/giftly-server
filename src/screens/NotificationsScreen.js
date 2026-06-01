@@ -25,13 +25,28 @@ export default function NotificationsScreen({ navigation }) {
   }
 
   async function fetchNotifications(userId) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('notifications')
-      .select('*, profiles!notifications_from_user_id_fkey(name, username)')
+      .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(50);
-    setNotifications(data || []);
+
+    if (error) { console.error('fetchNotifications error:', error.message); }
+
+    const rows = data || [];
+    if (!rows.length) { setNotifications([]); setLoading(false); return; }
+
+    // Fetch sender profiles separately to avoid FK constraint name issues
+    const senderIds = [...new Set(rows.map(n => n.from_user_id).filter(Boolean))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, name, username')
+      .in('id', senderIds);
+
+    const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+
+    setNotifications(rows.map(n => ({ ...n, profiles: byId[n.from_user_id] || null })));
     setLoading(false);
   }
 
