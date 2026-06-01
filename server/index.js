@@ -26,15 +26,40 @@ function setCache(key, data) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-// ── MercadoLibre — REST API pública (sin auth, ~300ms) ────────────────────────
-// Docs: https://developers.mercadolibre.cl/
+// ── MercadoLibre OAuth token ──────────────────────────────────────────────────
+let _mlToken = null;
+let _mlTokenExpiry = 0;
+
+async function getMLToken() {
+  const appId  = process.env.ML_APP_ID;
+  const secret = process.env.ML_APP_SECRET;
+  if (!appId || !secret) return null;
+  if (_mlToken && _mlTokenExpiry > Date.now()) return _mlToken;
+  try {
+    const { data } = await axios.post('https://api.mercadolibre.com/oauth/token', null, {
+      params: { grant_type: 'client_credentials', client_id: appId, client_secret: secret },
+      timeout: 5000,
+    });
+    _mlToken      = data.access_token;
+    _mlTokenExpiry = Date.now() + (data.expires_in - 300) * 1000;
+    console.log('✅ ML token refreshed');
+    return _mlToken;
+  } catch (e) {
+    console.error('ML token error:', e.response?.data?.message || e.message);
+    return null;
+  }
+}
+
+// ── MercadoLibre search ───────────────────────────────────────────────────────
 async function searchML(q, limit = 20) {
   try {
+    const token   = await getMLToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const { data } = await axios.get('https://api.mercadolibre.com/sites/MLC/search', {
       params: { q, limit: Math.min(limit, 50) },
+      headers,
       timeout: 8000,
     });
-
     return (data.results || [])
       .filter(item => item.condition !== 'used')
       .map(item => ({
@@ -43,9 +68,7 @@ async function searchML(q, limit = 20) {
         name:          String(item.title || '').trim().substring(0, 250),
         price:         Math.round(item.price || 0),
         originalPrice: item.original_price && item.original_price > item.price
-          ? Math.round(item.original_price)
-          : null,
-        // Replace -I.jpg (thumbnail) with -O.jpg (larger image)
+          ? Math.round(item.original_price) : null,
         imageUrl:      item.thumbnail?.replace(/-[A-Z]\.jpg$/, '-O.jpg') || null,
         permalink:     item.permalink || null,
         brand:         item.attributes?.find(a => a.id === 'BRAND')?.value_name?.trim() || '',
@@ -53,9 +76,34 @@ async function searchML(q, limit = 20) {
         scrapedAt:     new Date().toISOString(),
       }))
       .filter(p => p.name && p.price > 0);
-
   } catch (e) {
-    console.error('ML API error:', e.message);
+    console.error('ML API error:', e.response?.data?.message || e.message);
+    return [];
+  }
+}
+
+// ── DummyJSON fallback ────────────────────────────────────────────────────────
+async function searchDummy(q, limit = 20) {
+  try {
+    const { data } = await axios.get('https://dummyjson.com/products/search', {
+      params: { q, limit },
+      timeout: 8000,
+    });
+    return (data.products || []).map(item => ({
+      externalId:    `d${item.id}`,
+      source:        'MercadoLibre',
+      name:          item.title,
+      price:         Math.round(item.price * 950),
+      originalPrice: item.discountPercentage > 5
+        ? Math.round(item.price * 950 / (1 - item.discountPercentage / 100)) : null,
+      imageUrl:      item.thumbnail || null,
+      permalink:     null,
+      brand:         item.brand || '',
+      currency:      'CLP',
+      scrapedAt:     new Date().toISOString(),
+    })).filter(p => p.name && p.price > 0);
+  } catch (e) {
+    console.error('DummyJSON error:', e.message);
     return [];
   }
 }
@@ -186,14 +234,19 @@ async function searchAll(q, limit) {
     searchAmazon(q, Math.ceil(limit / 2)),
   ]);
 
-  const results = [
+  let results = [
     ...(mlR.status  === 'fulfilled' ? mlR.value  : []),
     ...(amzR.status === 'fulfilled' ? amzR.value : []),
   ].filter(p => p.name && p.price > 0);
 
   const mlCount  = mlR.value?.length  ?? '✗';
   const amzCount = amzR.value?.length ?? '✗';
-  console.log(`✅ ${results.length} resultados en ${Date.now() - t}ms — ML:${mlCount} Amazon:${amzCount}`);
+  console.log(`ML:${mlCount} Amazon:${amzCount} en ${Date.now() - t}ms`);
+
+  if (results.length === 0) {
+    console.log(`⚠️  ML+Amazon vacíos para "${q}" — usando DummyJSON fallback`);
+    results = await searchDummy(q, limit);
+  }
 
   if (results.length > 0) setCache(key, results);
   return results;
@@ -232,7 +285,8 @@ app.get('/search/ml', async (req, res) => {
   const cached = getCached(key);
   if (cached) return res.json({ results: cached });
   try {
-    const results = await searchML(q, safeLimit);
+    let results = await searchML(q, safeLimit);
+    if (results.length === 0) results = await searchDummy(q, safeLimit);
     if (results.length > 0) setCache(key, results);
     res.json({ results });
   } catch (e) {
