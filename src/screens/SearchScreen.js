@@ -23,15 +23,16 @@ function storeStyle(source) {
   return STORE[source] || { color: '#8A8A82', bg: '#F0EFE8', label: source };
 }
 
-// ── Category browsing (ML only, fast) ────────────────────────────────────────
+// ── Category browsing ─────────────────────────────────────────────────────────
+// Uses DummyJSON category slugs (guaranteed to have products)
 const CATEGORIES = [
-  { label: 'Todo',        queries: ['iphone', 'zapatillas nike', 'perfume mujer'] },
-  { label: 'Tecnología',  queries: ['iphone apple', 'samsung galaxy', 'airpods audifonos'] },
-  { label: 'Moda',        queries: ['zapatillas nike', 'zapatillas adidas', 'ropa mujer'] },
-  { label: 'Hogar',       queries: ['cafetera nespresso', 'robot aspirador', 'airfryer'] },
-  { label: 'Deportes',    queries: ['bicicleta montana', 'ropa deportiva', 'proteina whey'] },
-  { label: 'Belleza',     queries: ['perfume mujer', 'perfume hombre', 'serum vitamina c'] },
-  { label: 'Juguetes',    queries: ['lego', 'hot wheels', 'nintendo switch'] },
+  { label: 'Todo',        slugs: ['smartphones', 'fragrances', 'mens-shoes'] },
+  { label: 'Tecnología',  slugs: ['smartphones', 'laptops', 'tablets'] },
+  { label: 'Moda',        slugs: ['mens-shoes', 'womens-shoes', 'mens-shirts'] },
+  { label: 'Hogar',       slugs: ['kitchen-accessories', 'furniture', 'home-decoration'] },
+  { label: 'Deportes',    slugs: ['sports-accessories', 'mens-watches'] },
+  { label: 'Belleza',     slugs: ['fragrances', 'skin-care', 'beauty'] },
+  { label: 'Accesorios',  slugs: ['sunglasses', 'mobile-accessories', 'womens-jewellery'] },
 ];
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
@@ -45,28 +46,50 @@ async function fetchMultiRetailer(q, limit = 20) {
   return res.data?.results || [];
 }
 
-// ML-only search — calls MercadoLibre API directly from the browser.
-// The ML public API supports CORS, so no server proxy needed for browsing.
+// DummyJSON product mapper — USD → CLP (approximate ×950)
+function mapDummy(item) {
+  return {
+    externalId:    `d${item.id}`,
+    source:        'MercadoLibre',
+    name:          item.title,
+    price:         Math.round(item.price * 950),
+    originalPrice: item.discountPercentage > 5
+      ? Math.round(item.price * 950 / (1 - item.discountPercentage / 100))
+      : null,
+    imageUrl:      item.thumbnail || null,
+    permalink:     null,
+    brand:         item.brand || '',
+    currency:      'CLP',
+  };
+}
+
+// Category browsing — DummyJSON category endpoint (guaranteed results per category)
+async function fetchByCategory(slug, limit = 10) {
+  try {
+    const { data } = await axios.get(`https://dummyjson.com/products/category/${slug}`, {
+      params: { limit },
+      timeout: 8000,
+    });
+    return (data.products || []).map(mapDummy).filter(p => p.name && p.price > 0);
+  } catch (e) {
+    console.error('fetchByCategory error:', slug, e.message);
+    return [];
+  }
+}
+
+// Text search fallback via DummyJSON search
+// MercadoLibre now requires OAuth — will be restored once ML credentials are configured.
 async function fetchML(q, limit = 10) {
-  const { data } = await axios.get('https://api.mercadolibre.com/sites/MLC/search', {
-    params: { q, limit: Math.min(limit, 50) },
-    timeout: 8000,
-  });
-  return (data.results || [])
-    .filter(item => item.condition !== 'used')
-    .map(item => ({
-      externalId:    item.id,
-      source:        'MercadoLibre',
-      name:          String(item.title || '').trim().substring(0, 250),
-      price:         Math.round(item.price || 0),
-      originalPrice: item.original_price && item.original_price > item.price
-        ? Math.round(item.original_price) : null,
-      imageUrl:      item.thumbnail?.replace(/-[A-Z]\.jpg$/, '-O.jpg') || null,
-      permalink:     item.permalink || null,
-      brand:         item.attributes?.find(a => a.id === 'BRAND')?.value_name?.trim() || '',
-      currency:      'CLP',
-    }))
-    .filter(p => p.name && p.price > 0);
+  try {
+    const { data } = await axios.get('https://dummyjson.com/products/search', {
+      params: { q, limit },
+      timeout: 8000,
+    });
+    return (data.products || []).map(mapDummy).filter(p => p.name && p.price > 0);
+  } catch (e) {
+    console.error('fetchML error:', e.message);
+    return [];
+  }
 }
 
 // Unified item key across all sources
@@ -187,7 +210,7 @@ export default function SearchScreen({ navigation }) {
     setSelected(new Map());
     setActiveSources([]);
     try {
-      const responses = await Promise.allSettled(cat.queries.map(q => fetchML(q, 10)));
+      const responses = await Promise.allSettled(cat.slugs.map(s => fetchByCategory(s, 10)));
       const all = responses.flatMap(r => r.status === 'fulfilled' ? r.value : []);
       setResults(all, ['MercadoLibre']);
     } catch {
@@ -197,7 +220,7 @@ export default function SearchScreen({ navigation }) {
     }
   }
 
-  // Text search — all retailers (slower, 10-25s, but real multi-store)
+  // Text search — tries server first, falls back to DummyJSON if server returns nothing
   async function search(overrideQuery) {
     const q = (overrideQuery || query).trim();
     if (!q) return;
@@ -210,11 +233,18 @@ export default function SearchScreen({ navigation }) {
     setGroups([]);
     setActiveSources([]);
     try {
-      const results = await fetchMultiRetailer(q, 20);
+      let results = [];
+      try {
+        results = await fetchMultiRetailer(q, 20);
+      } catch { /* server unavailable — fall through to DummyJSON */ }
+
+      if (results.length === 0) {
+        results = await fetchML(q, 20);
+      }
       if (results.length === 0) setFetchError('Sin resultados para "' + q + '"');
       else setResults(results);
     } catch (e) {
-      setFetchError('Error de conexión con el servidor');
+      setFetchError('Sin resultados para "' + q + '"');
     } finally {
       setLoading(false);
       setSearching(false);
@@ -329,7 +359,7 @@ export default function SearchScreen({ navigation }) {
         </TouchableOpacity>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar en MercadoLibre, Amazon..."
+          placeholder="Buscar productos..."
           value={query}
           onChangeText={setQuery}
           onSubmitEditing={() => search()}
