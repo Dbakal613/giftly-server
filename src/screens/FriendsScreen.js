@@ -3,6 +3,7 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
   TextInput, ActivityIndicator
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { createNotification } from '../lib/notificationHelpers';
 
@@ -17,9 +18,17 @@ export default function FriendsScreen({ navigation }) {
   const [myId, setMyId]                 = useState(null);
   const [myProfile, setMyProfile]       = useState(null);
 
-  useEffect(() => {
-    init();
-  }, []);
+  useEffect(() => { init(); }, []);
+
+  // Re-fetch when returning from NotificationsScreen (after accepting a request)
+  useFocusEffect(
+    useCallback(() => {
+      if (myId) {
+        fetchFriends(myId);
+        fetchPending(myId);
+      }
+    }, [myId])
+  );
 
   async function init() {
     const { data: { user } } = await supabase.auth.getUser();
@@ -34,19 +43,35 @@ export default function FriendsScreen({ navigation }) {
   async function fetchFriends(userId) {
     const { data } = await supabase
       .from('friendships')
-      .select('friend_id, profiles!friendships_friend_id_fkey(id, name, username)')
+      .select('friend_id')
       .eq('user_id', userId)
       .eq('status', 'accepted');
-    setFriends(data || []);
+
+    const rows = data || [];
+    if (!rows.length) { setFriends([]); return; }
+
+    const ids = rows.map(r => r.friend_id);
+    const { data: profiles } = await supabase
+      .from('profiles').select('id, name, username').in('id', ids);
+    const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+    setFriends(rows.map(r => ({ friend_id: r.friend_id, profiles: byId[r.friend_id] || null })));
   }
 
   async function fetchPending(userId) {
     const { data } = await supabase
       .from('friendships')
-      .select('user_id, profiles!friendships_user_id_fkey(id, name, username)')
+      .select('user_id')
       .eq('friend_id', userId)
       .eq('status', 'pending');
-    setPending(data || []);
+
+    const rows = data || [];
+    if (!rows.length) { setPending([]); return; }
+
+    const ids = rows.map(r => r.user_id);
+    const { data: profiles } = await supabase
+      .from('profiles').select('id, name, username').in('id', ids);
+    const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+    setPending(rows.map(r => ({ user_id: r.user_id, profiles: byId[r.user_id] || null })));
   }
 
   async function searchUsers(text) {

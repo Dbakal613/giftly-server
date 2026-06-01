@@ -17,7 +17,7 @@ const STATUS_LABEL = {
 };
 
 export default function GroupGiftScreen({ route, navigation }) {
-  const { giftId, product: initialProduct } = route.params || {};
+  const { giftId, product: initialProduct, openInviteOnLoad } = route.params || {};
   const isManagement = !!giftId;
 
   // ── Shared state ──────────────────────────────────────────────────────────────
@@ -60,6 +60,11 @@ export default function GroupGiftScreen({ route, navigation }) {
 
   useEffect(() => { init(); }, []);
 
+  // Auto-open invite modal when navigating from creation success screen
+  useEffect(() => {
+    if (openInviteOnLoad && giftData && myId) openInvite();
+  }, [openInviteOnLoad, giftData, myId]);
+
   async function init() {
     const { data: { user } } = await supabase.auth.getUser();
     setMyId(user.id);
@@ -75,16 +80,24 @@ export default function GroupGiftScreen({ route, navigation }) {
     setLoadingGift(true);
     const { data } = await supabase
       .from('group_gifts')
-      .select(`
-        *,
-        products(id, name, image_emoji, image_url, price, store, brand),
-        group_gift_members(
-          id, amount, status, joined_at, user_id,
-          profiles!group_gift_members_user_id_fkey(id, name, username)
-        )
-      `)
+      .select(`*, products(id, name, image_emoji, image_url, price, store, brand),
+        group_gift_members(id, amount, status, joined_at, user_id)`)
       .eq('id', giftId)
       .single();
+
+    if (!data) { setGiftData(null); setLoadingGift(false); return; }
+
+    // Fetch member profiles separately to avoid FK constraint name issues
+    const memberIds = (data.group_gift_members || []).map(m => m.user_id);
+    if (memberIds.length) {
+      const { data: profiles } = await supabase
+        .from('profiles').select('id, name, username').in('id', memberIds);
+      const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+      data.group_gift_members = data.group_gift_members.map(m => ({
+        ...m, profiles: byId[m.user_id] || null,
+      }));
+    }
+
     setGiftData(data);
     setLoadingGift(false);
   }
@@ -99,19 +112,27 @@ export default function GroupGiftScreen({ route, navigation }) {
   async function openInvite() {
     setShowInvite(true);
     setLoadingFriends(true);
+
     const { data } = await supabase
       .from('friendships')
-      .select('friend_id, profiles!friendships_friend_id_fkey(id, name, username)')
+      .select('friend_id')
       .eq('user_id', myId)
       .eq('status', 'accepted');
 
-    const memberIds = new Set((giftData?.group_gift_members || []).map(m => m.user_id));
-    const available = (data || [])
-      .filter(f => !memberIds.has(f.friend_id))
-      .map(f => f.profiles)
-      .filter(Boolean);
+    const memberIds  = new Set((giftData?.group_gift_members || []).map(m => m.user_id));
+    const friendIds  = (data || []).map(f => f.friend_id).filter(id => !memberIds.has(id));
 
-    setFriends(available);
+    if (!friendIds.length) {
+      setFriends([]);
+      setSelectedFriends(new Set());
+      setLoadingFriends(false);
+      return;
+    }
+
+    const { data: profiles } = await supabase
+      .from('profiles').select('id, name, username').in('id', friendIds);
+
+    setFriends(profiles || []);
     setSelectedFriends(new Set());
     setLoadingFriends(false);
   }
@@ -584,9 +605,15 @@ export default function GroupGiftScreen({ route, navigation }) {
           </View>
           <TouchableOpacity
             style={styles.btnPrimary}
+            onPress={() => navigation.navigate('GroupGift', { giftId: createdGiftId, openInviteOnLoad: true })}
+          >
+            <Text style={styles.btnPrimaryText}>Invitar amigos 👥</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.cancelBtn, { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 14, padding: 16 }]}
             onPress={() => navigation.navigate('GroupGift', { giftId: createdGiftId })}
           >
-            <Text style={styles.btnPrimaryText}>Ver el regalo 🎁</Text>
+            <Text style={[styles.cancelBtnText, { color: '#1A1A18', fontWeight: '600' }]}>Ver el regalo 🎁</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.cancelBtn} onPress={() => navigation.navigate('Home')}>
             <Text style={styles.cancelBtnText}>Volver al inicio</Text>
