@@ -13,6 +13,7 @@ const CARD_W = (width - 48) / 2;
 // ── Store branding ────────────────────────────────────────────────────────────
 const STORE = {
   MercadoLibre: { color: '#E8A020', bg: '#FFF8E6', label: 'MercadoLibre' },
+  Amazon:        { color: '#FF9900', bg: '#FFF4E6', label: 'Amazon' },
   Falabella:    { color: '#1E6FCC', bg: '#E8F0FF', label: 'Falabella' },
   Paris:        { color: '#1B7A42', bg: '#E6F5EC', label: 'Paris' },
   Ripley:       { color: '#C0392B', bg: '#FDEAE8', label: 'Ripley' },
@@ -39,7 +40,7 @@ const CATEGORIES = [
 async function fetchMultiRetailer(q, limit = 20) {
   const res = await axios.get(`${SERVER_URL}/search`, {
     params: { q, limit },
-    timeout: 25000, // Puppeteer is slow — give it time
+    timeout: 15000,
   });
   return res.data?.results || [];
 }
@@ -77,6 +78,7 @@ function toProductShape(item) {
     brand:       item.brand || '',
     store:       item.source || item.store || 'MercadoLibre',
     price:       item.price,
+    currency:    item.currency || 'CLP',
     image_url:   item.imageUrl || item.image_url || null,
     image_emoji: '📦',
     category:    item.category || '',
@@ -322,7 +324,7 @@ export default function SearchScreen({ navigation }) {
         </TouchableOpacity>
         <TextInput
           style={styles.searchInput}
-          placeholder="Buscar en Falabella, Paris, Ripley, ML..."
+          placeholder="Buscar en MercadoLibre, Amazon..."
           value={query}
           onChangeText={setQuery}
           onSubmitEditing={() => search()}
@@ -377,10 +379,10 @@ export default function SearchScreen({ navigation }) {
           <ActivityIndicator color="#D94F3D" size="large" />
           <Text style={styles.loadingText}>
             {searching
-              ? 'Buscando en Falabella, Paris, Ripley y MercadoLibre...'
+              ? 'Buscando en MercadoLibre y Amazon...'
               : 'Cargando productos...'}
           </Text>
-          {searching && <Text style={styles.loadingHint}>Esto puede tomar 10-20 segundos</Text>}
+          {searching && <Text style={styles.loadingHint}>Esto puede tomar unos segundos</Text>}
         </View>
       ) : fetchError ? (
         <View style={styles.empty}>
@@ -477,11 +479,15 @@ export default function SearchScreen({ navigation }) {
                           ) : null}
                           <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
                           <Text style={[styles.cardPrice, { color: s.color }]}>
-                            ${item.price?.toLocaleString('es-CL')}
+                            {item.currency === 'USD'
+                              ? `US$${item.price?.toFixed(2)}`
+                              : `$${item.price?.toLocaleString('es-CL')}`}
                           </Text>
                           {item.originalPrice && item.originalPrice > item.price ? (
                             <Text style={styles.cardOriginalPrice}>
-                              ${item.originalPrice?.toLocaleString('es-CL')}
+                              {item.currency === 'USD'
+                                ? `US$${item.originalPrice?.toFixed(2)}`
+                                : `$${item.originalPrice?.toLocaleString('es-CL')}`}
                             </Text>
                           ) : null}
                         </View>

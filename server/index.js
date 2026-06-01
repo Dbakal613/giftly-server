@@ -1,34 +1,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
-const puppeteer = require('puppeteer');
+const axios   = require('axios');
+const crypto  = require('crypto');
 
 const app = express();
 app.use(cors());
 
-// ── Browser singleton ─────────────────────────────────────────────────────────
-let browser = null;
-
-async function getBrowser() {
-  if (browser) {
-    try { await browser.version(); return browser; } catch {}
-  }
-  browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled',
-    ],
-  });
-  return browser;
-}
-
-getBrowser()
-  .then(() => console.log('🌐 Browser listo'))
-  .catch(e => console.error('Browser error:', e.message));
-
-// ── In-memory cache (15 min TTL) ──────────────────────────────────────────────
-const cache = new Map();
+// ── In-memory cache (15 min TTL, max 200 entries) ─────────────────────────────
+const cache    = new Map();
 const CACHE_TTL = 15 * 60 * 1000;
 
 function getCached(key) {
@@ -39,7 +19,6 @@ function getCached(key) {
 }
 
 function setCache(key, data) {
-  // Keep cache bounded
   if (cache.size >= 200) {
     const oldest = [...cache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0][0];
     cache.delete(oldest);
@@ -47,331 +26,174 @@ function setCache(key, data) {
   cache.set(key, { data, ts: Date.now() });
 }
 
-// ── Page helper ───────────────────────────────────────────────────────────────
-async function newPage() {
-  const b = await getBrowser();
-  const page = await b.newPage();
-  await page.setUserAgent(
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  );
-  await page.setExtraHTTPHeaders({
-    'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-  });
-  // Remove webdriver flag (basic bot evasion)
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-  });
-  return page;
+// ── MercadoLibre — REST API pública (sin auth, ~300ms) ────────────────────────
+// Docs: https://developers.mercadolibre.cl/
+async function searchML(q, limit = 20) {
+  try {
+    const { data } = await axios.get('https://api.mercadolibre.com/sites/MLC/search', {
+      params: { q, limit: Math.min(limit, 50) },
+      timeout: 8000,
+    });
+
+    return (data.results || [])
+      .filter(item => item.condition !== 'used')
+      .map(item => ({
+        externalId:    item.id,
+        source:        'MercadoLibre',
+        name:          String(item.title || '').trim().substring(0, 250),
+        price:         Math.round(item.price || 0),
+        originalPrice: item.original_price && item.original_price > item.price
+          ? Math.round(item.original_price)
+          : null,
+        // Replace -I.jpg (thumbnail) with -O.jpg (larger image)
+        imageUrl:      item.thumbnail?.replace(/-[A-Z]\.jpg$/, '-O.jpg') || null,
+        permalink:     item.permalink || null,
+        brand:         item.attributes?.find(a => a.id === 'BRAND')?.value_name?.trim() || '',
+        currency:      'CLP',
+        scrapedAt:     new Date().toISOString(),
+      }))
+      .filter(p => p.name && p.price > 0);
+
+  } catch (e) {
+    console.error('ML API error:', e.message);
+    return [];
+  }
 }
 
-// ── Normalization ─────────────────────────────────────────────────────────────
-function normalize(source, r) {
-  const price = Math.round(
-    Number(String(r.price || '0').replace(/[^0-9]/g, '')) || 0
+// ── Amazon PA API 5.0 — AWS Signature V4 ──────────────────────────────────────
+// Setup: https://webservices.amazon.com/paapi5/documentation/
+// Requiere en .env:
+//   AMAZON_ACCESS_KEY  → AWS access key de tu cuenta de Associates
+//   AMAZON_SECRET_KEY  → AWS secret key
+//   AMAZON_PARTNER_TAG → tu tag de Amazon Associates (ej. "miblog-20")
+
+function hmac(key, data, encoding = undefined) {
+  return crypto.createHmac('sha256', key).update(data).digest(encoding);
+}
+
+function buildAmazonHeaders(body, accessKey, secretKey, partnerTag) {
+  const now         = new Date();
+  const amzDate     = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp   = amzDate.slice(0, 8);
+  const host        = 'webservices.amazon.com';
+  const path        = '/paapi5/searchitems';
+  const region      = 'us-east-1';
+  const service     = 'ProductAdvertisingAPI';
+  const target      = 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.SearchItems';
+
+  const payloadHash = crypto.createHash('sha256').update(body).digest('hex');
+
+  // Headers must be sorted alphabetically
+  const canonicalHeaders = [
+    `content-encoding:amz-1.0`,
+    `content-type:application/json; charset=utf-8`,
+    `host:${host}`,
+    `x-amz-date:${amzDate}`,
+    `x-amz-target:${target}`,
+  ].join('\n') + '\n';
+  const signedHeaders = 'content-encoding;content-type;host;x-amz-date;x-amz-target';
+
+  const canonicalRequest = ['POST', path, '', canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const credentialScope  = `${dateStamp}/${region}/${service}/aws4_request`;
+  const stringToSign     = ['AWS4-HMAC-SHA256', amzDate, credentialScope,
+    crypto.createHash('sha256').update(canonicalRequest).digest('hex')].join('\n');
+
+  const signingKey = hmac(
+    hmac(hmac(hmac('AWS4' + secretKey, dateStamp), region), service),
+    'aws4_request'
   );
-  const origPrice = r.originalPrice
-    ? Math.round(Number(String(r.originalPrice).replace(/[^0-9]/g, '')) || 0)
-    : null;
+  const signature = hmac(signingKey, stringToSign, 'hex');
+
   return {
-    externalId:    String(r.externalId || ''),
-    source,
-    name:          String(r.name || '').trim().substring(0, 250),
-    price,
-    originalPrice: origPrice && origPrice > price ? origPrice : null,
-    imageUrl:      r.imageUrl || r.image_url || null,
-    permalink:     r.permalink || r.href || null,
-    brand:         String(r.brand || '').trim(),
-    currency:      'CLP',
-    scrapedAt:     new Date().toISOString(),
+    'Content-Type':     'application/json; charset=utf-8',
+    'Content-Encoding': 'amz-1.0',
+    'X-Amz-Date':       amzDate,
+    'X-Amz-Target':     target,
+    'Authorization':    `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
   };
 }
 
-// ── MercadoLibre ──────────────────────────────────────────────────────────────
-async function searchML(q, limit = 20) {
-  const page = await newPage();
+async function searchAmazon(q, limit = 10) {
+  const accessKey  = process.env.AMAZON_ACCESS_KEY;
+  const secretKey  = process.env.AMAZON_SECRET_KEY;
+  const partnerTag = process.env.AMAZON_PARTNER_TAG;
+
+  if (!accessKey || !secretKey || !partnerTag) {
+    return []; // Keys not configured — silently skip
+  }
+
+  const body = JSON.stringify({
+    Keywords:    q,
+    Resources:   [
+      'Images.Primary.Medium',
+      'ItemInfo.Title',
+      'ItemInfo.ByLineInfo',
+      'Offers.Listings.Price',
+      'Offers.Listings.SavingBasis',
+    ],
+    SearchIndex:  'All',
+    ItemCount:    Math.min(limit, 10), // PA API max per request
+    PartnerTag:   partnerTag,
+    PartnerType:  'Associates',
+    Marketplace:  'www.amazon.com',
+  });
+
   try {
-    await page.goto(
-      `https://listado.mercadolibre.cl/${encodeURIComponent(q.replace(/\s+/g, '-'))}`,
-      { waitUntil: 'domcontentloaded', timeout: 15000 }
+    const headers  = buildAmazonHeaders(body, accessKey, secretKey, partnerTag);
+    const { data } = await axios.post(
+      'https://webservices.amazon.com/paapi5/searchitems',
+      body,
+      { headers, timeout: 8000 }
     );
-    await page.waitForSelector('.ui-search-layout__item, .results-item', { timeout: 8000 }).catch(() => {});
 
-    const products = await page.evaluate((maxItems) => {
-      // Try __NEXT_DATA__ (ML sometimes uses Next.js)
-      const nd = window.__NEXT_DATA__;
-      if (nd) {
-        try {
-          const items =
-            nd.props?.pageProps?.dehydratedState?.queries?.find(q => q.queryKey?.[0] === 'search')?.state?.data?.results ||
-            nd.props?.pageProps?.results || [];
-          if (items.length > 0) {
-            return items.slice(0, maxItems).map(p => ({
-              externalId: p.id || '',
-              name:       p.title || '',
-              price:      p.price || 0,
-              originalPrice: p.original_price || null,
-              imageUrl:   p.thumbnail || '',
-              permalink:  p.permalink || '',
-              brand:      p.attributes?.find(a => a.id === 'BRAND')?.value_name || '',
-            }));
-          }
-        } catch {}
-      }
-      // DOM fallback
-      const results = [];
-      document.querySelectorAll('.ui-search-layout__item, .results-item').forEach((card, i) => {
-        if (i >= maxItems) return;
-        const link    = card.querySelector('a');
-        const img     = card.querySelector('img');
-        const nameEl  = card.querySelector('h2, .ui-search-item__title, [class*="title"]');
-        const priceEl = card.querySelector('.andes-money-amount__fraction, .price-tag-fraction');
-        const origEl  = card.querySelector('.andes-money-amount--previous .andes-money-amount__fraction');
-        const name    = nameEl?.textContent?.trim() || '';
-        const price   = parseInt((priceEl?.textContent || '0').replace(/\./g, '').replace(/[^0-9]/g, '')) || 0;
-        const origPrice = origEl ? parseInt((origEl.textContent || '0').replace(/\./g, '').replace(/[^0-9]/g, '')) || null : null;
-        if (name && price > 0) {
-          results.push({
-            externalId:    link?.href?.match(/MLC-?(\d+)/)?.[1] || String(i),
-            name,
-            price,
-            originalPrice: origPrice,
-            imageUrl:      img?.src || img?.dataset?.src || '',
-            permalink:     link?.href || '',
-            brand:         '',
-          });
-        }
-      });
-      return results;
-    }, limit);
+    return (data?.SearchResult?.Items || [])
+      .map(item => {
+        const listing      = item.Offers?.Listings?.[0];
+        const price        = listing?.Price?.Amount || 0;
+        const originalPrice = listing?.SavingBasis?.Amount || null;
+        return {
+          externalId:    item.ASIN,
+          source:        'Amazon',
+          name:          String(item.ItemInfo?.Title?.DisplayValue || '').trim().substring(0, 250),
+          price,
+          originalPrice: originalPrice && originalPrice > price ? originalPrice : null,
+          imageUrl:      item.Images?.Primary?.Medium?.URL || null,
+          permalink:     item.DetailPageURL || null,
+          brand:         item.ItemInfo?.ByLineInfo?.Brand?.DisplayValue?.trim() || '',
+          currency:      'USD',
+          scrapedAt:     new Date().toISOString(),
+        };
+      })
+      .filter(p => p.name && p.price > 0);
 
-    return products
-      .filter(p => p.name && p.price > 0)
-      .map(p => normalize('MercadoLibre', p));
   } catch (e) {
-    console.error('ML error:', e.message);
+    console.error('Amazon PA API error:', e.response?.data?.Errors?.[0]?.Message || e.message);
     return [];
-  } finally {
-    await page.close().catch(() => {});
   }
 }
 
-// ── Falabella ─────────────────────────────────────────────────────────────────
-async function searchFalabella(q, limit = 10) {
-  const page = await newPage();
-  try {
-    await page.goto(
-      `https://www.falabella.com/falabella-cl/search?Ntt=${encodeURIComponent(q)}`,
-      { waitUntil: 'domcontentloaded', timeout: 15000 }
-    );
-    await page.waitForSelector('a[href*="/product/"]', { timeout: 8000 }).catch(() => {});
-
-    const products = await page.evaluate((maxItems) => {
-      function extractPrice(el) {
-        // Find price numbers like $19.990 using regex, take the minimum (current offer)
-        const text = el?.textContent || '';
-        const matches = text.match(/\$\s*[\d.]+/g) || [];
-        const prices = matches
-          .map(s => parseInt(s.replace(/[^0-9]/g, '')) )
-          .filter(p => p > 1000 && p < 100000000);
-        return prices.length > 0 ? { price: Math.min(...prices), originalPrice: prices.length > 1 ? Math.max(...prices) : null } : { price: 0, originalPrice: null };
-      }
-
-      const seen = new Set();
-      const results = [];
-      document.querySelectorAll('a[href*="/product/"]').forEach((link) => {
-        if (results.length >= maxItems) return;
-        if (seen.has(link.href)) return;
-        seen.add(link.href);
-
-        const img   = link.querySelector('img');
-        const brand = link.querySelector('[class*="brandName"], [class*="brand"]')?.textContent?.trim() || '';
-        // Name: all matching els, skip the first if it's the brand text
-        const nameEls = [...link.querySelectorAll('b, [class*="subTitle"], [class*="title"], [class*="name"]')];
-        let name = '';
-        const skipWords = /^(por\s|gratis|nuevo|oferta|envío|llega|retira|patrocinado|cupon|cmr|online|cyber)/i;
-        for (const el of nameEls) {
-          const t = el.textContent.trim();
-          if (t && t !== brand && t.length > 10 && !skipWords.test(t)) {
-            name = t; break;
-          }
-        }
-        if (!name) name = link.getAttribute('aria-label') || '';
-
-        const priceEl = link.querySelector('[class*="price"], [class*="Price"]');
-        const { price, originalPrice } = extractPrice(priceEl);
-
-        if (name.length > 4 && img?.src && price > 0) {
-          results.push({ name, price, originalPrice, imageUrl: img.src, permalink: link.href, brand });
-        }
-      });
-      return results;
-    }, limit);
-
-    return products.map((p, i) => normalize('Falabella', { ...p, externalId: `fa_${q}_${i}` }));
-  } catch (e) {
-    console.error('Falabella error:', e.message);
-    return [];
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-// ── Paris ─────────────────────────────────────────────────────────────────────
-async function searchParis(q, limit = 10) {
-  const page = await newPage();
-  try {
-    await page.goto(
-      `https://www.paris.cl/search?q=${encodeURIComponent(q)}`,
-      { waitUntil: 'domcontentloaded', timeout: 15000 }
-    );
-    await page.waitForSelector('a[href*="/p/"], [class*="pod"], [class*="product"]', { timeout: 8000 }).catch(() => {});
-
-    const products = await page.evaluate((maxItems) => {
-      // Try __NEXT_DATA__ first
-      const nd = window.__NEXT_DATA__;
-      if (nd) {
-        try {
-          const hits =
-            nd.props?.pageProps?.searchResponse?.hits ||
-            nd.props?.pageProps?.products ||
-            nd.props?.pageProps?.searchResults?.products || [];
-          if (hits.length > 0) {
-            return hits.slice(0, maxItems).map(p => ({
-              externalId:    p.productId || p.id || p.partNumber || '',
-              name:          p.name || p.displayName || p.productName || '',
-              price:         p.prices?.normalPrice?.value || p.offerPrice || p.price || 0,
-              originalPrice: p.prices?.originalPrice?.value || p.listPrice || null,
-              imageUrl:      p.images?.[0]?.url || p.imageUrl || p.thumbnail || '',
-              permalink:     p.pdpUrl ? `https://www.paris.cl${p.pdpUrl}` : (p.url ? `https://www.paris.cl${p.url}` : null),
-              brand:         p.brand || '',
-            }));
-          }
-        } catch {}
-      }
-      // DOM fallback
-      const results = [];
-      document.querySelectorAll('a[href*="/p/"]').forEach((link, i) => {
-        if (i >= maxItems) return;
-        const img     = link.querySelector('img');
-        const nameEl  = link.querySelector('[class*="title"], [class*="name"], h3, h2');
-        const name    = nameEl?.textContent?.trim() || '';
-        const priceEl = link.querySelector('[class*="price"]');
-        const price   = parseInt((priceEl?.textContent || '0').replace(/[^0-9]/g, '')) || 0;
-        if (name && img?.src) {
-          results.push({ name, price, imageUrl: img.src, permalink: link.href });
-        }
-      });
-      return results;
-    }, limit);
-
-    return products
-      .filter(p => p.name && p.price > 0)
-      .map((p, i) => normalize('Paris', { ...p, externalId: p.externalId || `pa_${q}_${i}` }));
-  } catch (e) {
-    console.error('Paris error:', e.message);
-    return [];
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-// ── Ripley ────────────────────────────────────────────────────────────────────
-async function searchRipley(q, limit = 10) {
-  const page = await newPage();
-  try {
-    await page.goto(
-      `https://simple.ripley.cl/search?query=${encodeURIComponent(q)}`,
-      { waitUntil: 'domcontentloaded', timeout: 15000 }
-    );
-    await page.waitForSelector('[class*="catalog-item"], [class*="CatalogItem"]', { timeout: 8000 }).catch(() => {});
-
-    const products = await page.evaluate((maxItems) => {
-      // Try __NEXT_DATA__ first
-      const nd = window.__NEXT_DATA__;
-      if (nd) {
-        try {
-          const items =
-            nd.props?.pageProps?.searchResult?.products ||
-            nd.props?.pageProps?.catalog?.products ||
-            nd.props?.pageProps?.products || [];
-          if (items.length > 0) {
-            return items.slice(0, maxItems).map(p => ({
-              externalId:    p.partNumber || p.id || '',
-              name:          p.name || p.displayName || '',
-              price:         p.offerPrice || p.listPrice || p.price || 0,
-              originalPrice: p.listPrice !== p.offerPrice ? p.listPrice : null,
-              imageUrl:      p.primaryImageUrl || p.images?.[0]?.url || '',
-              permalink:     p.slug ? `https://simple.ripley.cl${p.slug}` : null,
-              brand:         p.brand || '',
-            }));
-          }
-        } catch {}
-      }
-      // DOM fallback
-      const results = [];
-      document.querySelectorAll('[class*="catalog-item"] a, [class*="CatalogItem"] a').forEach((link, i) => {
-        if (i >= maxItems) return;
-        const img     = link.querySelector('img');
-        const nameEl  = link.querySelector('[class*="title"], [class*="name"], h3');
-        const name    = nameEl?.textContent?.trim() || '';
-        const priceEl = link.querySelector('[class*="internet-price"], [class*="offer-price"], [class*="price"]');
-        const price   = parseInt((priceEl?.textContent || '0').replace(/[^0-9]/g, '')) || 0;
-        const href    = link.getAttribute('href') || '';
-        if (name && img?.src) {
-          results.push({
-            name,
-            price,
-            imageUrl: img.src,
-            permalink: href.startsWith('http') ? href : `https://simple.ripley.cl${href}`,
-          });
-        }
-      });
-      return results;
-    }, limit);
-
-    return products
-      .filter(p => p.name && p.price > 0)
-      .map((p, i) => normalize('Ripley', { ...p, externalId: p.externalId || `ri_${q}_${i}` }));
-  } catch (e) {
-    console.error('Ripley error:', e.message);
-    return [];
-  } finally {
-    await page.close().catch(() => {});
-  }
-}
-
-// ── Parallel multi-retailer search (with cache) ───────────────────────────────
+// ── Multi-source search (cache + parallel) ────────────────────────────────────
 async function searchAll(q, limit) {
   const key = `all|${q.trim().toLowerCase()}|${limit}`;
   const cached = getCached(key);
-  if (cached) {
-    console.log(`⚡ Cache hit: "${q}"`);
-    return cached;
-  }
+  if (cached) { console.log(`⚡ Cache hit: "${q}"`); return cached; }
 
-  console.log(`🔍 Buscando en todas las tiendas: "${q}"`);
+  console.log(`🔍 Buscando: "${q}"`);
   const t = Date.now();
 
-  const [mlR, faR, paR, riR] = await Promise.allSettled([
+  const [mlR, amzR] = await Promise.allSettled([
     searchML(q, limit),
-    searchFalabella(q, Math.ceil(limit / 2)),
-    searchParis(q, Math.ceil(limit / 2)),
-    searchRipley(q, Math.ceil(limit / 2)),
+    searchAmazon(q, Math.ceil(limit / 2)),
   ]);
 
   const results = [
-    ...(mlR.status === 'fulfilled' ? mlR.value : []),
-    ...(faR.status === 'fulfilled' ? faR.value : []),
-    ...(paR.status === 'fulfilled' ? paR.value : []),
-    ...(riR.status === 'fulfilled' ? riR.value : []),
+    ...(mlR.status  === 'fulfilled' ? mlR.value  : []),
+    ...(amzR.status === 'fulfilled' ? amzR.value : []),
   ].filter(p => p.name && p.price > 0);
 
-  console.log(
-    `✅ ${results.length} resultados en ${Date.now() - t}ms` +
-    ` — ML:${mlR.value?.length ?? '✗'} FA:${faR.value?.length ?? '✗'}` +
-    ` PA:${paR.value?.length ?? '✗'} RI:${riR.value?.length ?? '✗'}`
-  );
+  const mlCount  = mlR.value?.length  ?? '✗';
+  const amzCount = amzR.value?.length ?? '✗';
+  console.log(`✅ ${results.length} resultados en ${Date.now() - t}ms — ML:${mlCount} Amazon:${amzCount}`);
 
   if (results.length > 0) setCache(key, results);
   return results;
@@ -379,10 +201,14 @@ async function searchAll(q, limit) {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.get('/', (_req, res) =>
-  res.json({ status: 'Giftly server v2 🎁', stores: ['MercadoLibre', 'Falabella', 'Paris', 'Ripley'] })
+  res.json({
+    status: 'Giftly server v3 🎁',
+    stores: ['MercadoLibre', 'Amazon'],
+    amazon: !!process.env.AMAZON_ACCESS_KEY,
+  })
 );
 
-// Multi-retailer search (used for explicit text queries)
+// Multi-source search (text queries)
 app.get('/search', async (req, res) => {
   const { q, limit = 20 } = req.query;
   if (!q) return res.json({ results: [], sources: [], total: 0 });
@@ -397,7 +223,7 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// ML-only search (used for fast category browsing)
+// ML-only search (category browsing — fast)
 app.get('/search/ml', async (req, res) => {
   const { q, limit = 20 } = req.query;
   if (!q) return res.json({ results: [] });
@@ -415,4 +241,4 @@ app.get('/search/ml', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`✅ Giftly server v2 en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Giftly server v3 en puerto ${PORT}`));
