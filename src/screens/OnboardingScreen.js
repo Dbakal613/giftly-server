@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator
+  View, Text, TouchableOpacity, StyleSheet, ScrollView,
+  ActivityIndicator, Image, Platform,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 
 const STORES = [
@@ -19,6 +21,7 @@ const INTERESTS = [
 
 const STEPS = [
   { id: 'welcome' },
+  { id: 'photo' },
   { id: 'stores' },
   { id: 'interests' },
   { id: 'privacy' },
@@ -38,17 +41,76 @@ const VIS_OPTIONS = [
 ];
 
 export default function OnboardingScreen({ onDone }) {
-  const [step, setStep]                         = useState(0);
-  const [selectedStores, setSelectedStores]     = useState([]);
+  const [step, setStep]                           = useState(0);
+  const [photoUri, setPhotoUri]                   = useState(null);
+  const [uploadingPhoto, setUploadingPhoto]       = useState(false);
+  const [avatarUrl, setAvatarUrl]                 = useState(null);
+  const [userInitial, setUserInitial]             = useState('?');
+  const [selectedStores, setSelectedStores]       = useState([]);
   const [selectedInterests, setSelectedInterests] = useState([]);
   const [profileVisibility, setProfileVisibility] = useState('public');
-  const [listVisibility, setListVisibility]     = useState({
+  const [listVisibility, setListVisibility]       = useState({
     want_to_buy:   'public',
     bought:        'friends',
     recommend:     'public',
     not_recommend: 'private',
   });
   const [saving, setSaving] = useState(false);
+
+  // Load initial when arriving at photo step
+  async function onPhotoStepEnter() {
+    if (userInitial !== '?') return;
+    const { data: { user } } = await supabase.auth.getUser();
+    const name = user?.user_metadata?.name || user?.user_metadata?.username || user?.email || '';
+    setUserInitial(name.charAt(0).toUpperCase() || '?');
+  }
+
+  async function pickPhoto() {
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+      if (result.canceled) return;
+      const uri = result.assets[0].uri;
+      setPhotoUri(uri);
+      await uploadPhoto(uri);
+    } catch (e) {
+      console.error('pickPhoto error:', e);
+    }
+  }
+
+  async function uploadPhoto(uri) {
+    setUploadingPhoto(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+      const path = `${user.id}/avatar.${ext}`;
+
+      const { error } = await supabase.storage
+        .from('avatars')
+        .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars').getPublicUrl(path);
+
+      setAvatarUrl(publicUrl);
+    } catch (e) {
+      console.error('uploadPhoto error:', e.message);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  }
 
   function toggleStore(key) {
     setSelectedStores(prev =>
@@ -72,18 +134,17 @@ export default function OnboardingScreen({ onDone }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         try { localStorage.setItem(`onboarding_done_${user.id}`, '1'); } catch {}
-        try {
-          await supabase.from('profiles').upsert({
-            id:                   user.id,
-            name:                 user.user_metadata?.name     || '',
-            username:             user.user_metadata?.username || '',
-            preferred_stores:     selectedStores,
-            preferred_categories: selectedInterests,
-            profile_visibility:   profileVisibility,
-            list_visibility:      listVisibility,
-            onboarding_done:      true,
-          });
-        } catch {}
+        await supabase.from('profiles').upsert({
+          id:                   user.id,
+          name:                 user.user_metadata?.name     || '',
+          username:             user.user_metadata?.username || '',
+          avatar_url:           avatarUrl || null,
+          preferred_stores:     selectedStores,
+          preferred_categories: selectedInterests,
+          profile_visibility:   profileVisibility,
+          list_visibility:      listVisibility,
+          onboarding_done:      true,
+        });
       }
     } catch (e) {
       console.error('Onboarding error:', e);
@@ -94,8 +155,17 @@ export default function OnboardingScreen({ onDone }) {
   }
 
   function next() {
+    if (step === 0) {
+      onPhotoStepEnter();
+    }
     if (step < STEPS.length - 1) setStep(step + 1);
     else finish();
+  }
+
+  function skipPhoto() {
+    setPhotoUri(null);
+    setAvatarUrl(null);
+    setStep(step + 1);
   }
 
   const isLast = step === STEPS.length - 1;
@@ -143,8 +213,51 @@ export default function OnboardingScreen({ onDone }) {
           </View>
         )}
 
-        {/* ── PASO 1: Tiendas ── */}
+        {/* ── PASO 1: Foto de perfil ── */}
         {step === 1 && (
+          <View style={styles.slide}>
+            <Text style={styles.emoji}>📸</Text>
+            <Text style={styles.title}>Tu foto de perfil</Text>
+            <Text style={styles.sub}>Pon una foto para que tus amigos te reconozcan al enviarte solicitudes.</Text>
+
+            {/* Avatar preview */}
+            <TouchableOpacity style={styles.avatarWrap} onPress={pickPhoto} disabled={uploadingPhoto}>
+              {photoUri ? (
+                <Image source={{ uri: photoUri }} style={styles.avatarPhoto} />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Text style={styles.avatarInitial}>{userInitial}</Text>
+                </View>
+              )}
+              {uploadingPhoto ? (
+                <View style={styles.avatarOverlay}>
+                  <ActivityIndicator color="white" />
+                </View>
+              ) : (
+                <View style={styles.avatarBadge}>
+                  <Text style={styles.avatarBadgeText}>📷</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.btnUpload}
+              onPress={pickPhoto}
+              disabled={uploadingPhoto}
+            >
+              <Text style={styles.btnUploadText}>
+                {photoUri ? 'Cambiar foto' : 'Subir foto'}
+              </Text>
+            </TouchableOpacity>
+
+            {photoUri && (
+              <Text style={styles.photoOk}>✓ Foto lista</Text>
+            )}
+          </View>
+        )}
+
+        {/* ── PASO 2: Tiendas ── */}
+        {step === 2 && (
           <View style={styles.slide}>
             <Text style={styles.emoji}>🏪</Text>
             <Text style={styles.title}>¿Qué tiendas usas?</Text>
@@ -168,8 +281,8 @@ export default function OnboardingScreen({ onDone }) {
           </View>
         )}
 
-        {/* ── PASO 2: Intereses ── */}
-        {step === 2 && (
+        {/* ── PASO 3: Intereses ── */}
+        {step === 3 && (
           <View style={styles.slide}>
             <Text style={styles.emoji}>✨</Text>
             <Text style={styles.title}>¿Qué te interesa?</Text>
@@ -191,14 +304,13 @@ export default function OnboardingScreen({ onDone }) {
           </View>
         )}
 
-        {/* ── PASO 3: Privacidad ── */}
-        {step === 3 && (
+        {/* ── PASO 4: Privacidad ── */}
+        {step === 4 && (
           <View style={styles.slide}>
             <Text style={styles.emoji}>🔒</Text>
             <Text style={styles.title}>Tu privacidad</Text>
             <Text style={styles.sub}>Controla quién puede ver tu perfil y tus listas. Puedes cambiarlo cuando quieras en Ajustes.</Text>
 
-            {/* Profile visibility */}
             <View style={styles.privSection}>
               <Text style={styles.privLabel}>¿Quién puede encontrarte?</Text>
               <View style={styles.visRow}>
@@ -216,12 +328,9 @@ export default function OnboardingScreen({ onDone }) {
               </View>
             </View>
 
-            {/* Default list visibility */}
             <View style={styles.privSection}>
               <Text style={styles.privLabel}>¿Quién puede ver tus listas?</Text>
               <Text style={styles.privSub}>Puedes ajustar cada lista individualmente después</Text>
-
-              {/* Quick-set all */}
               <View style={styles.quickSet}>
                 {VIS_OPTIONS.map(opt => (
                   <TouchableOpacity
@@ -237,8 +346,6 @@ export default function OnboardingScreen({ onDone }) {
                   </TouchableOpacity>
                 ))}
               </View>
-
-              {/* Per-list */}
               {LIST_LABELS.map(list => (
                 <View key={list.key} style={styles.listVisRow}>
                   <Text style={styles.listVisIcon}>{list.icon}</Text>
@@ -264,14 +371,25 @@ export default function OnboardingScreen({ onDone }) {
 
       </ScrollView>
 
-      {/* Bottom CTA — no skip button */}
+      {/* Bottom CTA */}
       <View style={styles.bottom}>
-        <TouchableOpacity style={styles.btnPrimary} onPress={next} disabled={saving}>
+        <TouchableOpacity
+          style={[styles.btnPrimary, (saving || uploadingPhoto) && { opacity: 0.6 }]}
+          onPress={next}
+          disabled={saving || uploadingPhoto}
+        >
           {saving
             ? <ActivityIndicator color="white" />
             : <Text style={styles.btnPrimaryText}>{isLast ? '¡Empezar! 🎉' : 'Continuar →'}</Text>
           }
         </TouchableOpacity>
+
+        {/* Skip only on photo step */}
+        {step === 1 && !photoUri && (
+          <TouchableOpacity style={styles.skipBtn} onPress={skipPhoto}>
+            <Text style={styles.skipText}>Usar mis iniciales por ahora</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -295,7 +413,19 @@ const styles = StyleSheet.create({
   featTitle:          { fontSize: 14, fontWeight: '600', color: '#1A1A18', marginBottom: 2 },
   featDesc:           { fontSize: 13, color: '#8A8A82', lineHeight: 18 },
 
-  // Stores (step 1)
+  // Photo (step 1)
+  avatarWrap:         { width: 130, height: 130, marginBottom: 24, position: 'relative' },
+  avatarPhoto:        { width: 130, height: 130, borderRadius: 65, borderWidth: 3, borderColor: '#D94F3D' },
+  avatarPlaceholder:  { width: 130, height: 130, borderRadius: 65, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: '#D94F3D' },
+  avatarInitial:      { fontSize: 52, fontWeight: '800', color: 'white' },
+  avatarOverlay:      { position: 'absolute', width: 130, height: 130, borderRadius: 65, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  avatarBadge:        { position: 'absolute', bottom: 4, right: 4, width: 34, height: 34, borderRadius: 17, backgroundColor: '#1A1A18', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FAFAF7' },
+  avatarBadgeText:    { fontSize: 16 },
+  btnUpload:          { borderWidth: 1.5, borderColor: '#D94F3D', borderRadius: 100, paddingHorizontal: 24, paddingVertical: 10, marginBottom: 10 },
+  btnUploadText:      { fontSize: 15, fontWeight: '600', color: '#D94F3D' },
+  photoOk:            { fontSize: 14, color: '#2D8C5E', fontWeight: '600' },
+
+  // Stores (step 2)
   storeGrid:          { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'center' },
   storeBtn:           { width: '45%', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, borderRadius: 14, borderWidth: 2, borderColor: '#E8E8E2', backgroundColor: '#FFFFFF' },
   storeBtnActive:     { borderColor: '#D94F3D', backgroundColor: '#FDE8E5' },
@@ -304,14 +434,14 @@ const styles = StyleSheet.create({
   storeLabelActive:   { color: '#D94F3D' },
   storeCheck:         { color: '#D94F3D', fontWeight: '700' },
 
-  // Interests (step 2)
+  // Interests (step 3)
   interestGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center', width: '100%' },
   interestBtn:        { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 100, borderWidth: 2, borderColor: '#E8E8E2', backgroundColor: '#FFFFFF' },
   interestBtnActive:  { borderColor: '#D94F3D', backgroundColor: '#FDE8E5' },
   interestLabel:      { fontSize: 14, color: '#8A8A82', fontWeight: '500' },
   interestLabelActive:{ color: '#D94F3D', fontWeight: '600' },
 
-  // Privacy (step 3)
+  // Privacy (step 4)
   privSection:        { width: '100%', marginBottom: 24 },
   privLabel:          { fontSize: 13, fontWeight: '700', color: '#1A1A18', marginBottom: 4 },
   privSub:            { fontSize: 12, color: '#8A8A82', marginBottom: 10 },
@@ -336,7 +466,9 @@ const styles = StyleSheet.create({
   miniChipTextActive: { color: '#D94F3D', fontWeight: '700' },
 
   // Bottom
-  bottom:             { padding: 24, paddingBottom: 40 },
+  bottom:             { padding: 24, paddingBottom: 40, gap: 8 },
   btnPrimary:         { backgroundColor: '#D94F3D', borderRadius: 14, padding: 16, alignItems: 'center' },
   btnPrimaryText:     { color: 'white', fontSize: 16, fontWeight: '700' },
+  skipBtn:            { alignItems: 'center', padding: 10 },
+  skipText:           { fontSize: 14, color: '#8A8A82' },
 });

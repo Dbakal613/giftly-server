@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Image, Dimensions
+  ActivityIndicator, RefreshControl, Image, Dimensions, Platform,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors, radius, shadow, text } from '../lib/theme';
@@ -34,7 +34,7 @@ export default function HomeScreen({ navigation }) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     setUserId(user.id);
-    const { data: prof } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    const { data: prof } = await supabase.from('profiles').select('id, name, username, avatar_url').eq('id', user.id).single();
     setProfile(prof);
     fetchCounts(user.id);
     fetchGroupGifts(user.id);
@@ -146,9 +146,16 @@ export default function HomeScreen({ navigation }) {
             )}
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase() || '?'}</Text>
-            </View>
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url + (Platform.OS === 'web' ? `?t=${Date.now() % 10000}` : '') }}
+                style={styles.avatarPhoto}
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{firstName.charAt(0).toUpperCase() || '?'}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -309,6 +316,7 @@ const styles = StyleSheet.create({
   badgeText:       { color: 'white', fontSize: 9, fontWeight: '700' },
   avatar:          { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   avatarText:      { color: 'white', fontWeight: '700', fontSize: 15 },
+  avatarPhoto:     { width: 38, height: 38, borderRadius: 19 },
 
   // Tabs
   tabsRow:         { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 14, gap: 8, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
