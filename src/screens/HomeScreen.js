@@ -28,23 +28,31 @@ export default function HomeScreen({ navigation }) {
   const [userId, setUserId]         = useState(null);
 
   useEffect(() => { init(); }, []);
-  useEffect(() => { if (userId) fetchItems(); }, [activeList, userId]);
+  // Re-fetch items when tab changes (not on first mount — init handles that)
+  useEffect(() => { if (userId) fetchItems(userId); }, [activeList]);
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setUserId(user.id);
-    const { data: prof } = await supabase.from('profiles').select('id, name, username, avatar_url').eq('id', user.id).single();
+    // getSession() reads from local cache — no network round-trip
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    const uid = session.user.id;
+    setUserId(uid);
+
+    // Fire all fetches in parallel — profile + counts + gifts + items + unread at once
+    const [{ data: prof }] = await Promise.all([
+      supabase.from('profiles').select('id, name, username, avatar_url').eq('id', uid).single(),
+      fetchCounts(uid),
+      fetchGroupGifts(uid),
+      fetchUnread(uid),
+      fetchItems(uid),
+    ]);
     setProfile(prof);
-    fetchCounts(user.id);
-    fetchGroupGifts(user.id);
-    fetchUnread(user.id);
 
     // Realtime badge
     const channel = supabase
-      .channel('notifs_' + user.id)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        () => fetchUnread(user.id))
+      .channel('notifs_' + uid)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${uid}` },
+        () => fetchUnread(uid))
       .subscribe();
     return () => supabase.removeChannel(channel);
   }
@@ -57,32 +65,33 @@ export default function HomeScreen({ navigation }) {
   }
 
   async function fetchCounts(uid) {
-    const newCounts = {};
-    for (const list of LISTS) {
-      const { count } = await supabase.from('list_items')
-        .select('*', { count: 'exact', head: true })
-        .eq('list_type', list.key).eq('user_id', uid);
-      newCounts[list.key] = count || 0;
+    // 1 query instead of 4 sequential — fetch all list_items and count in memory
+    const { data } = await supabase.from('list_items')
+      .select('list_type')
+      .eq('user_id', uid);
+    const newCounts = { want_to_buy: 0, bought: 0, recommend: 0, not_recommend: 0 };
+    for (const row of (data || [])) {
+      if (newCounts[row.list_type] !== undefined) newCounts[row.list_type]++;
     }
     setCounts(newCounts);
   }
 
   async function fetchGroupGifts(uid) {
-    const SELECT = '*, products(name, image_emoji, image_url, price), group_gift_members(amount, status, user_id)';
+    const SELECT = 'id, recipient_name, occasion, creator_id, products(name, image_emoji, image_url, price), group_gift_members(amount, status, user_id)';
 
-    // Gifts I created
-    const { data: created } = await supabase.from('group_gifts')
-      .select(SELECT)
-      .eq('creator_id', uid).eq('status', 'active')
-      .order('created_at', { ascending: false }).limit(5);
+    // Fetch created gifts and member rows in parallel
+    const [{ data: created }, { data: memberRows }] = await Promise.all([
+      supabase.from('group_gifts')
+        .select(SELECT)
+        .eq('creator_id', uid).eq('status', 'active')
+        .order('created_at', { ascending: false }).limit(5),
+      supabase.from('group_gift_members')
+        .select('group_gift_id')
+        .eq('user_id', uid)
+        .in('status', ['pending', 'paid', 'accepted']),
+    ]);
 
-    // Gift IDs where I'm a member (but not creator)
-    const { data: memberRows } = await supabase.from('group_gift_members')
-      .select('group_gift_id')
-      .eq('user_id', uid)
-      .in('status', ['pending', 'paid', 'accepted']);
-
-    const createdIds  = new Set((created || []).map(g => g.id));
+    const createdIds    = new Set((created || []).map(g => g.id));
     const memberGiftIds = (memberRows || [])
       .map(r => r.group_gift_id)
       .filter(id => !createdIds.has(id));
@@ -91,8 +100,7 @@ export default function HomeScreen({ navigation }) {
     if (memberGiftIds.length > 0) {
       const { data } = await supabase.from('group_gifts')
         .select(SELECT)
-        .in('id', memberGiftIds)
-        .eq('status', 'active')
+        .in('id', memberGiftIds).eq('status', 'active')
         .order('created_at', { ascending: false }).limit(5);
       memberGifts = data || [];
     }
@@ -100,12 +108,14 @@ export default function HomeScreen({ navigation }) {
     setGroupGifts([...(created || []), ...memberGifts].slice(0, 6));
   }
 
-  async function fetchItems() {
+  async function fetchItems(uid) {
+    const id = uid || userId;
+    if (!id) return;
     setLoading(true);
     try {
       const { data } = await supabase.from('list_items')
         .select('id, list_type, added_at, products(id, name, brand, category, image_emoji, image_url, price, store)')
-        .eq('list_type', activeList).eq('user_id', userId)
+        .eq('list_type', activeList).eq('user_id', id)
         .order('added_at', { ascending: false });
       setItems(data || []);
     } catch (e) { console.error(e); }
@@ -162,7 +172,7 @@ export default function HomeScreen({ navigation }) {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchItems(); fetchGroupGifts(userId); fetchCounts(userId); }} tintColor={colors.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); Promise.all([fetchItems(), fetchGroupGifts(userId), fetchCounts(userId)]); }} tintColor={colors.accent} />}
       >
         {/* ── List tabs ── */}
         <View style={styles.tabsRow}>
