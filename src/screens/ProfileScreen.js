@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput, ActivityIndicator, Image, Platform } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../lib/supabase';
 
 const LIST_LABELS = [
@@ -25,6 +26,8 @@ export default function ProfileScreen({ navigation }) {
   const [saveError, setSaveError] = useState('');
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [savingPrivacy, setSavingPrivacy] = useState(false);
+  const [localAvatarUri, setLocalAvatarUri] = useState(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   useEffect(() => { fetchProfile(); }, []);
 
@@ -84,6 +87,48 @@ export default function ProfileScreen({ navigation }) {
     await supabase.auth.signOut();
   }
 
+  function resizeToDataUrl(uri) {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = 200; c.height = 200;
+        c.getContext('2d').drawImage(img, 0, 0, 200, 200);
+        resolve(c.toDataURL('image/jpeg', 0.78));
+      };
+      img.onerror = reject;
+      img.src = uri;
+    });
+  }
+
+  async function pickAndUploadAvatar() {
+    try {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (result.canceled) return;
+      const uri = result.assets[0].uri;
+      setLocalAvatarUri(uri);
+      setUploadingAvatar(true);
+      const dataUrl = await resizeToDataUrl(uri);
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('profiles').upsert({ id: authUser.id, avatar_url: dataUrl });
+      if (error) throw error;
+      setProfile(prev => ({ ...prev, avatar_url: dataUrl }));
+    } catch (e) {
+      console.error('pickAndUploadAvatar error:', e.message);
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
   if (loading) return <View style={styles.center}><ActivityIndicator color="#D94F3D" size="large" /></View>;
 
   const profileVis  = profile?.profile_visibility || 'public';
@@ -102,9 +147,31 @@ export default function ProfileScreen({ navigation }) {
       </View>
 
       <View style={styles.avatarSection}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{(profile?.name || user?.email || '?').charAt(0).toUpperCase()}</Text>
-        </View>
+        <TouchableOpacity
+          style={styles.avatarWrap}
+          onPress={editing ? pickAndUploadAvatar : undefined}
+          disabled={uploadingAvatar}
+          activeOpacity={editing ? 0.8 : 1}
+        >
+          {(localAvatarUri || profile?.avatar_url) ? (
+            <Image
+              source={{ uri: localAvatarUri || profile.avatar_url }}
+              style={styles.avatarPhoto}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{(profile?.name || user?.email || '?').charAt(0).toUpperCase()}</Text>
+            </View>
+          )}
+          {editing && (
+            <View style={styles.avatarEditOverlay}>
+              {uploadingAvatar
+                ? <ActivityIndicator color="white" />
+                : <Text style={{ fontSize: 22 }}>📷</Text>
+              }
+            </View>
+          )}
+        </TouchableOpacity>
         {editing ? (
           <View style={styles.editForm}>
             {saveError ? (
@@ -263,9 +330,12 @@ const styles = StyleSheet.create({
   backText:        { fontSize: 22, color: '#1A1A18' },
   headerTitle:     { fontSize: 17, fontWeight: '700', color: '#1A1A18' },
   editBtn:         { fontSize: 15, color: '#D94F3D', fontWeight: '600' },
-  avatarSection:   { alignItems: 'center', padding: 28, backgroundColor: '#FFFFFF', marginBottom: 12 },
-  avatar:          { width: 80, height: 80, borderRadius: 40, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  avatarText:      { color: 'white', fontSize: 32, fontWeight: '700' },
+  avatarSection:      { alignItems: 'center', padding: 28, backgroundColor: '#FFFFFF', marginBottom: 12 },
+  avatarWrap:         { width: 80, height: 80, borderRadius: 40, marginBottom: 14, position: 'relative' },
+  avatar:             { width: 80, height: 80, borderRadius: 40, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center' },
+  avatarText:         { color: 'white', fontSize: 32, fontWeight: '700' },
+  avatarPhoto:        { width: 80, height: 80, borderRadius: 40 },
+  avatarEditOverlay:  { position: 'absolute', top: 0, left: 0, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
   profileInfo:     { alignItems: 'center' },
   profileName:     { fontSize: 22, fontWeight: '700', color: '#1A1A18', marginBottom: 4 },
   profileUsername: { fontSize: 14, color: '#8A8A82', marginBottom: 2 },

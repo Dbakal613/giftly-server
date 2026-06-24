@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   ActivityIndicator, Image, Platform,
@@ -56,6 +56,7 @@ export default function OnboardingScreen({ onDone }) {
     not_recommend: 'private',
   });
   const [saving, setSaving] = useState(false);
+  const avatarUrlRef = useRef(null);
 
   // Load initial when arriving at photo step
   async function onPhotoStepEnter() {
@@ -75,41 +76,34 @@ export default function OnboardingScreen({ onDone }) {
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
+        quality: 0.8,
       });
       if (result.canceled) return;
       const uri = result.assets[0].uri;
       setPhotoUri(uri);
-      await uploadPhoto(uri);
+      setUploadingPhoto(true);
+      const dataUrl = await resizeToDataUrl(uri);
+      avatarUrlRef.current = dataUrl;
+      setAvatarUrl(dataUrl);
     } catch (e) {
       console.error('pickPhoto error:', e);
-    }
-  }
-
-  async function uploadPhoto(uri) {
-    setUploadingPhoto(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
-      const path = `${user.id}/avatar.${ext}`;
-
-      const { error } = await supabase.storage
-        .from('avatars')
-        .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
-
-      if (error) throw error;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars').getPublicUrl(path);
-
-      setAvatarUrl(publicUrl);
-    } catch (e) {
-      console.error('uploadPhoto error:', e.message);
     } finally {
       setUploadingPhoto(false);
     }
+  }
+
+  function resizeToDataUrl(uri) {
+    return new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = 200; c.height = 200;
+        c.getContext('2d').drawImage(img, 0, 0, 200, 200);
+        resolve(c.toDataURL('image/jpeg', 0.78));
+      };
+      img.onerror = reject;
+      img.src = uri;
+    });
   }
 
   function toggleStore(key) {
@@ -134,17 +128,21 @@ export default function OnboardingScreen({ onDone }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
         try { localStorage.setItem(`onboarding_done_${user.id}`, '1'); } catch {}
-        await supabase.from('profiles').upsert({
+        // Read existing profile so we don't overwrite name/username set by auth provider
+        const { data: existing } = await supabase
+          .from('profiles').select('name,username').eq('id', user.id).maybeSingle();
+        const upsertData = {
           id:                   user.id,
-          name:                 user.user_metadata?.name     || '',
-          username:             user.user_metadata?.username || '',
-          avatar_url:           avatarUrl || null,
           preferred_stores:     selectedStores,
           preferred_categories: selectedInterests,
           profile_visibility:   profileVisibility,
           list_visibility:      listVisibility,
           onboarding_done:      true,
-        });
+        };
+        if (avatarUrlRef.current) upsertData.avatar_url = avatarUrlRef.current;
+        if (!existing?.name)     upsertData.name     = user.user_metadata?.name     || '';
+        if (!existing?.username) upsertData.username = user.user_metadata?.username || '';
+        await supabase.from('profiles').upsert(upsertData);
       }
     } catch (e) {
       console.error('Onboarding error:', e);

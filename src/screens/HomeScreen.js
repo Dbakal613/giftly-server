@@ -158,7 +158,7 @@ export default function HomeScreen({ navigation }) {
           <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
             {profile?.avatar_url ? (
               <Image
-                source={{ uri: profile.avatar_url + (Platform.OS === 'web' ? `?t=${Date.now() % 10000}` : '') }}
+                source={{ uri: profile.avatar_url.startsWith('data:') ? profile.avatar_url : profile.avatar_url + (Platform.OS === 'web' ? `?t=${Date.now() % 10000}` : '') }}
                 style={styles.avatarPhoto}
               />
             ) : (
