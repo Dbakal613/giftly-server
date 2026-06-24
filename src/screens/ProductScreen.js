@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Linking, TextInput, Modal, Image } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { formatPrice } from '../data/products';
 
 const LISTS = [
   { key: 'want_to_buy', label: '🛍️ Quiero comprar' },
@@ -14,6 +15,8 @@ export default function ProductScreen({ route, navigation }) {
   const [adding, setAdding] = useState(false);
   const [showListModal, setShowListModal] = useState(false);
   const [showAlertModal, setShowAlertModal] = useState(false);
+  const [wishlists, setWishlists] = useState([]);
+  const [loadingWishlists, setLoadingWishlists] = useState(false);
   const [targetPrice, setTargetPrice] = useState(product.price ? String(Math.round(product.price * 0.9)) : '');
   const [savingAlert, setSavingAlert] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
@@ -22,6 +25,65 @@ export default function ProductScreen({ route, navigation }) {
   const [reviewText, setReviewText] = useState('');
   const [savingReview, setSavingReview] = useState(false);
   const [reviewProductId, setReviewProductId] = useState(null);
+
+  async function openListModal() {
+    setShowListModal(true);
+    setLoadingWishlists(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('wishlists')
+        .select('id, title')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      setWishlists(data || []);
+    } catch {
+      setWishlists([]);
+    } finally {
+      setLoadingWishlists(false);
+    }
+  }
+
+  async function addToWishlist(wishlistId, wishlistTitle) {
+    setAdding(true);
+    setShowListModal(false);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      let productId = product.id;
+      if (!productId) {
+        const { data: existing } = await supabase.from('products')
+          .select('id').eq('name', product.name).eq('store', product.store || '').maybeSingle();
+        productId = existing?.id;
+        if (!productId) {
+          const { data: newP, error: insertErr } = await supabase.from('products').insert({
+            name:        product.name,
+            brand:       product.brand || '',
+            store:       product.store || '',
+            price:       Math.round(product.price || 0),
+            image_emoji: product.image_emoji || '📦',
+            image_url:   product.image_url || null,
+            category:    product.category || '',
+          }).select('id').single();
+          if (insertErr) throw new Error('No se pudo guardar el producto: ' + insertErr.message);
+          productId = newP?.id;
+        }
+      }
+      if (!productId) throw new Error('No se pudo obtener el ID del producto');
+      const { error } = await supabase.from('wishlist_items').upsert(
+        { wishlist_id: wishlistId, product_id: String(productId) },
+        { onConflict: 'wishlist_id,product_id' }
+      );
+      if (error && error.code !== '23505') throw error;
+      showToast(`✓ Guardado en "${wishlistTitle}"`);
+    } catch (e) {
+      console.error(e);
+      showToast('Error: ' + e.message);
+    } finally {
+      setAdding(false);
+    }
+  }
 
   function showToast(msg) {
     setSuccessMsg(msg);
@@ -138,19 +200,19 @@ export default function ProductScreen({ route, navigation }) {
           <Text style={styles.store}>Disponible en {product.store}</Text>
         </View>
 
+        {product.description ? (
+          <View style={{ paddingHorizontal: 20, paddingBottom: 12, backgroundColor: '#FFFFFF' }}>
+            <Text style={{ fontSize: 14, color: '#5A5A52', lineHeight: 22 }}>{product.description}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.actions}>
-          <TouchableOpacity style={styles.btnPrimary} onPress={() => setShowListModal(true)} disabled={adding}>
-            {adding ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>🛍️ Agregar a mi lista</Text>}
+          <TouchableOpacity style={styles.btnPrimary} onPress={openListModal} disabled={adding}>
+            {adding ? <ActivityIndicator color="white" /> : <Text style={styles.btnPrimaryText}>＋ Guardar en wishlist</Text>}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.btnAlert} onPress={() => setShowAlertModal(true)}>
-            <Text style={styles.btnAlertText}>🔔 Activar alerta de precio</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.btnGift} onPress={() => navigation.navigate('GroupGift', { product })}>
-            <Text style={styles.btnGiftText}>🎁 Crear regalo grupal</Text>
-          </TouchableOpacity>
-          {product.permalink ? (
-            <TouchableOpacity style={styles.btnStore} onPress={() => Linking.openURL(product.permalink)}>
-              <Text style={styles.btnStoreText}>🔗 Ver en {product.store || 'tienda'}</Text>
+          {(product.external_url || product.permalink) ? (
+            <TouchableOpacity style={styles.btnStore} onPress={() => Linking.openURL(product.external_url || product.permalink)}>
+              <Text style={styles.btnStoreText}>🔗 Ver en {product.source_marketplace || product.store || 'tienda'}</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -167,6 +229,26 @@ export default function ProductScreen({ route, navigation }) {
                 <Text style={styles.listOptionText}>{list.label}</Text>
               </TouchableOpacity>
             ))}
+
+            {/* Named wishlists section */}
+            {loadingWishlists ? (
+              <ActivityIndicator color="#D94F3D" style={{ marginTop: 4 }} />
+            ) : wishlists.length > 0 ? (
+              <>
+                <View style={styles.wishlistDivider}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>o en una wishlist</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+                {wishlists.map(wl => (
+                  <TouchableOpacity key={wl.id} style={[styles.listOption, styles.wlOption]} onPress={() => addToWishlist(wl.id, wl.title)}>
+                    <Text style={styles.wlOptionIcon}>📋</Text>
+                    <Text style={styles.listOptionText}>{wl.title}</Text>
+                  </TouchableOpacity>
+                ))}
+              </>
+            ) : null}
+
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowListModal(false)}>
               <Text style={styles.cancelBtnText}>Cancelar</Text>
             </TouchableOpacity>
@@ -266,7 +348,12 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 18, fontWeight: '700', color: '#1A1A18' },
   modalProduct: { fontSize: 13, color: '#8A8A82', marginBottom: 4 },
   listOption: { backgroundColor: '#FAFAF7', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#E8E8E2' },
-  listOptionText: { fontSize: 15, fontWeight: '500', color: '#1A1A18' },
+  listOptionText: { fontSize: 15, fontWeight: '500', color: '#1A1A18', flex: 1 },
+  wlOption: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  wlOptionIcon: { fontSize: 16 },
+  wishlistDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#E8E8E2' },
+  dividerText: { fontSize: 12, color: '#8A8A82', fontWeight: '500' },
   cancelBtn: { padding: 14, alignItems: 'center' },
   cancelBtnText: { fontSize: 15, color: '#8A8A82' },
   priceInputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#E8E8E2', borderRadius: 14, paddingHorizontal: 16 },

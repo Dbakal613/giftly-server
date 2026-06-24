@@ -16,6 +16,9 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import PriceAlertsScreen from '../screens/PriceAlertsScreen';
 import GroupGiftScreen from '../screens/GroupGiftScreen';
 import PublicGiftScreen from '../screens/PublicGiftScreen';
+import ExploreScreen from '../screens/ExploreScreen';
+import WishlistsScreen from '../screens/WishlistsScreen';
+import WishlistDetailScreen from '../screens/WishlistDetailScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,7 +26,9 @@ const linking = {
   prefixes: [],
   config: {
     screens: {
-      PublicGift: 'gift/:giftId',
+      PublicGift:      'gift/:giftId',
+      WishlistDetail:  'wishlist/:wishlistId',
+      FriendProfile:   'u/:username',
     },
   },
 };
@@ -109,16 +114,24 @@ export default function AppNavigator() {
   return (
     <NavigationContainer linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Home" component={HomeScreen} />
-        <Stack.Screen name="Search" component={SearchScreen} />
-        <Stack.Screen name="Product" component={ProductScreen} />
-        <Stack.Screen name="Profile" component={ProfileScreen} />
-        <Stack.Screen name="Friends" component={FriendsScreen} />
+        {/* ── Core MVP screens ── */}
+        <Stack.Screen name="Home"          component={HomeScreen} />
+        <Stack.Screen name="Explore"       component={ExploreScreen} />
+        <Stack.Screen name="Product"       component={ProductScreen} />
+        <Stack.Screen name="Wishlists"        component={WishlistsScreen} />
+        <Stack.Screen name="WishlistDetail" component={WishlistDetailScreen} />
+        <Stack.Screen name="Profile"       component={ProfileScreen} />
         <Stack.Screen name="FriendProfile" component={FriendProfileScreen} />
+        <Stack.Screen name="Friends"       component={FriendsScreen} />
         <Stack.Screen name="Notifications" component={NotificationsScreen} />
-        <Stack.Screen name="PriceAlerts" component={PriceAlertsScreen} />
-        <Stack.Screen name="GroupGift" component={GroupGiftScreen} />
-        <Stack.Screen name="PublicGift" component={PublicGiftScreen} />
+
+        {/* ── Secondary / legacy ── */}
+        <Stack.Screen name="Search"        component={SearchScreen} />
+        <Stack.Screen name="PriceAlerts"   component={PriceAlertsScreen} />
+
+        {/* ── Kept for future use (not promoted in UI) ── */}
+        <Stack.Screen name="GroupGift"     component={GroupGiftScreen} />
+        <Stack.Screen name="PublicGift"    component={PublicGiftScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

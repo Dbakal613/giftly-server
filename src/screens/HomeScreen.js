@@ -23,7 +23,6 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [profile, setProfile]       = useState(null);
   const [counts, setCounts]         = useState({});
-  const [groupGifts, setGroupGifts] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [userId, setUserId]         = useState(null);
 
@@ -38,11 +37,10 @@ export default function HomeScreen({ navigation }) {
     const uid = session.user.id;
     setUserId(uid);
 
-    // Fire all fetches in parallel — profile + counts + gifts + items + unread at once
+    // Fire all fetches in parallel
     const [{ data: prof }] = await Promise.all([
       supabase.from('profiles').select('id, name, username, avatar_url').eq('id', uid).single(),
       fetchCounts(uid),
-      fetchGroupGifts(uid),
       fetchUnread(uid),
       fetchItems(uid),
     ]);
@@ -76,38 +74,6 @@ export default function HomeScreen({ navigation }) {
     setCounts(newCounts);
   }
 
-  async function fetchGroupGifts(uid) {
-    const SELECT = 'id, recipient_name, occasion, creator_id, products(name, image_emoji, image_url, price), group_gift_members(amount, status, user_id)';
-
-    // Fetch created gifts and member rows in parallel
-    const [{ data: created }, { data: memberRows }] = await Promise.all([
-      supabase.from('group_gifts')
-        .select(SELECT)
-        .eq('creator_id', uid).eq('status', 'active')
-        .order('created_at', { ascending: false }).limit(5),
-      supabase.from('group_gift_members')
-        .select('group_gift_id')
-        .eq('user_id', uid)
-        .in('status', ['pending', 'paid', 'accepted']),
-    ]);
-
-    const createdIds    = new Set((created || []).map(g => g.id));
-    const memberGiftIds = (memberRows || [])
-      .map(r => r.group_gift_id)
-      .filter(id => !createdIds.has(id));
-
-    let memberGifts = [];
-    if (memberGiftIds.length > 0) {
-      const { data } = await supabase.from('group_gifts')
-        .select(SELECT)
-        .in('id', memberGiftIds).eq('status', 'active')
-        .order('created_at', { ascending: false }).limit(5);
-      memberGifts = data || [];
-    }
-
-    setGroupGifts([...(created || []), ...memberGifts].slice(0, 6));
-  }
-
   async function fetchItems(uid) {
     const id = uid || userId;
     if (!id) return;
@@ -126,13 +92,6 @@ export default function HomeScreen({ navigation }) {
     await supabase.from('list_items').delete().eq('id', itemId);
     fetchItems();
     fetchCounts(userId);
-  }
-
-  function getGiftProgress(gift) {
-    const members = gift.group_gift_members || [];
-    const paid = members.filter(m => m.status === 'paid').reduce((sum, m) => sum + (m.amount || 0), 0);
-    const total = gift.products?.price || 0;
-    return { paid, total, pct: total > 0 ? Math.min((paid / total) * 100, 100) : 0 };
   }
 
   const activeListData = LISTS.find(l => l.key === activeList);
@@ -189,49 +148,23 @@ export default function HomeScreen({ navigation }) {
           ))}
         </View>
 
-        {/* ── Search shortcut ── */}
-        <TouchableOpacity onPress={() => navigation.navigate('Search')} style={styles.searchBar}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <Text style={styles.searchPlaceholder}>Buscar en Falabella, Ripley, Paris...</Text>
-        </TouchableOpacity>
-
-        {/* ── Group gifts ── */}
-        {groupGifts.length > 0 && (
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>🎁 Regalos grupales</Text>
-              <TouchableOpacity onPress={() => navigation.navigate('GroupGift', {})}>
-                <Text style={styles.sectionLink}>+ Nuevo</Text>
-              </TouchableOpacity>
+        {/* ── Explore shortcut ── */}
+        <View style={styles.exploreRow}>
+          <TouchableOpacity onPress={() => navigation.navigate('Explore')} style={[styles.shortcutBtn, { flex: 1 }]}>
+            <Text style={styles.shortcutIcon}>✨</Text>
+            <View>
+              <Text style={styles.shortcutTitle}>Explorar productos</Text>
+              <Text style={styles.shortcutSub}>Bubba, Launge, Froens y más</Text>
             </View>
-            {groupGifts.map(gift => {
-              const { paid, total, pct } = getGiftProgress(gift);
-              return (
-                <TouchableOpacity key={gift.id} style={styles.giftCard} onPress={() => navigation.navigate('GroupGift', { giftId: gift.id })}>
-                  <View style={styles.giftTop}>
-                    <View style={styles.giftEmoji}>
-                      <Text style={{ fontSize: 22 }}>{gift.products?.image_emoji || '🎁'}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.giftName} numberOfLines={1}>{gift.products?.name || 'Regalo'}</Text>
-                      <Text style={styles.giftFor}>Para {gift.recipient_name} · {gift.occasion}</Text>
-                    </View>
-                    <View style={styles.giftPctBadge}>
-                      <Text style={styles.giftPctText}>{Math.round(pct)}%</Text>
-                    </View>
-                  </View>
-                  <View style={styles.progressBg}>
-                    <View style={[styles.progressFill, { width: `${pct}%` }]} />
-                  </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                    <Text style={styles.giftPaid}>${paid.toLocaleString('es-CL')} reunidos</Text>
-                    <Text style={styles.giftTotal}>de ${total.toLocaleString('es-CL')}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Wishlists')} style={[styles.shortcutBtn, { flex: 1 }]}>
+            <Text style={styles.shortcutIcon}>📋</Text>
+            <View>
+              <Text style={styles.shortcutTitle}>Mis Wishlists</Text>
+              <Text style={styles.shortcutSub}>Listas nombradas</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
 
         {/* ── Product list ── */}
         <View style={styles.section}>
@@ -292,10 +225,10 @@ export default function HomeScreen({ navigation }) {
       {/* ── Bottom nav ── */}
       <View style={styles.bottomNav}>
         {[
-          { icon: '🏠', label: 'Inicio',  screen: null,      active: true },
-          { icon: '🔍', label: 'Buscar',  screen: 'Search' },
-          { icon: '👥', label: 'Amigos',  screen: 'Friends' },
-          { icon: '👤', label: 'Perfil',  screen: 'Profile' },
+          { icon: '🏠', label: 'Inicio',   screen: null,      active: true },
+          { icon: '✨', label: 'Explorar', screen: 'Explore' },
+          { icon: '👥', label: 'Amigos',   screen: 'Friends' },
+          { icon: '👤', label: 'Perfil',   screen: 'Profile' },
         ].map(item => (
           <TouchableOpacity
             key={item.label}
@@ -335,30 +268,18 @@ const styles = StyleSheet.create({
   tabCount:        { fontSize: 20, fontWeight: '800' },
   tabLabel:        { fontSize: 10, fontWeight: '600', textAlign: 'center' },
 
-  // Search bar
-  searchBar:       { flexDirection: 'row', alignItems: 'center', gap: 10, margin: 16, backgroundColor: colors.surface, borderRadius: radius.md, padding: 14, borderWidth: 1.5, borderColor: colors.border, ...shadow.sm },
-  searchIcon:      { fontSize: 16 },
-  searchPlaceholder: { fontSize: 14, color: colors.muted },
+  // Explore / wishlists shortcuts
+  exploreRow:      { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginTop: 14, marginBottom: 4 },
+  shortcutBtn:     { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.surface, borderRadius: radius.md, padding: 14, borderWidth: 1.5, borderColor: colors.border, ...shadow.sm },
+  shortcutIcon:    { fontSize: 22 },
+  shortcutTitle:   { fontSize: 13, fontWeight: '700', color: colors.ink },
+  shortcutSub:     { fontSize: 11, color: colors.muted, marginTop: 1 },
 
   // Sections
   section:         { paddingHorizontal: 16, marginBottom: 8 },
   sectionHeader:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   sectionTitle:    { fontSize: 16, fontWeight: '700', color: colors.ink },
-  sectionLink:     { fontSize: 13, color: colors.accent, fontWeight: '600' },
   sectionCount:    { fontSize: 13, color: colors.muted },
-
-  // Group gifts
-  giftCard:        { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 16, marginBottom: 10, borderWidth: 1, borderColor: colors.border, ...shadow.sm },
-  giftTop:         { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
-  giftEmoji:       { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.redBg, alignItems: 'center', justifyContent: 'center' },
-  giftName:        { fontSize: 14, fontWeight: '600', color: colors.ink, marginBottom: 2 },
-  giftFor:         { fontSize: 12, color: colors.muted },
-  giftPctBadge:    { backgroundColor: colors.redBg, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  giftPctText:     { fontSize: 13, fontWeight: '700', color: colors.accent },
-  progressBg:      { height: 5, backgroundColor: colors.tagBg, borderRadius: 100, overflow: 'hidden', marginBottom: 8 },
-  progressFill:    { height: '100%', backgroundColor: colors.green, borderRadius: 100 },
-  giftPaid:        { fontSize: 12, fontWeight: '600', color: colors.green },
-  giftTotal:       { fontSize: 12, color: colors.muted },
 
   // Grid
   grid:            { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
