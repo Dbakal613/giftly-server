@@ -79,7 +79,7 @@ export function buildProductUrl(store, directUrl, productName) {
 
 export const STORES = [
   { name: 'MercadoLibre', dot: '#E8A020', bg: '#FEF9E8' },
-  { name: 'Falabella',    dot: '#3D7DD9', bg: '#E8F0FE' },
-  { name: 'Ripley',       dot: '#D94F3D', bg: '#FDE8E5' },
-  { name: 'Paris',        dot: '#2D8C5E', bg: '#DCF5EB' },
+  { name: 'Falabella',    dot: '#4A6FA5', bg: '#D8E4F5' },
+  { name: 'Ripley',       dot: '#B85C45', bg: '#E8C4B8' },
+  { name: 'Paris',        dot: '#3E7A5E', bg: '#D4EDE3' },
 ];

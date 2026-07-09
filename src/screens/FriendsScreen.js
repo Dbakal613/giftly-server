@@ -1,313 +1,174 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, ActivityIndicator
-} from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, TextInput, ActivityIndicator } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { supabase } from '../lib/supabase';
-import { createNotification } from '../lib/notificationHelpers';
+import { colors, radius } from '../lib/theme';
+import { getCurrentUser } from '../services/auth';
+import { fetchProfile } from '../services/profiles';
+import {
+  fetchFriends, fetchPendingRequests,
+  searchUsers, checkFriendshipExists,
+  sendFriendRequest, acceptFriendRequest, declineFriendRequest,
+} from '../services/friendships';
+import { useToast } from '../hooks/useToast';
+import Toast from '../components/Toast';
+import EmptyState from '../components/EmptyState';
+import ScreenHeader from '../components/ScreenHeader';
 
 export default function FriendsScreen({ navigation }) {
-  const [friends, setFriends]           = useState([]);
-  const [pending, setPending]           = useState([]);   // incoming requests
-  const [search, setSearch]             = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading]           = useState(true);
-  const [addingId, setAddingId]         = useState(null);
-  const [toast, setToast]               = useState('');
-  const [myId, setMyId]                 = useState(null);
-  const [myProfile, setMyProfile]       = useState(null);
+  const { toast, showToast } = useToast();
+  const [friends, setFriends]       = useState([]);
+  const [pending, setPending]       = useState([]);
+  const [results, setResults]       = useState([]);
+  const [query, setQuery]           = useState('');
+  const [loading, setLoading]       = useState(true);
+  const [actionId, setActionId]     = useState(null);
+  const [myId, setMyId]             = useState(null);
+  const [myProfile, setMyProfile]   = useState(null);
 
   useEffect(() => { init(); }, []);
 
-  // Re-fetch when returning from NotificationsScreen (after accepting a request)
   useFocusEffect(
     useCallback(() => {
-      if (myId) {
-        fetchFriends(myId);
-        fetchPending(myId);
-      }
+      if (myId) { loadFriends(myId); loadPending(myId); }
     }, [myId])
   );
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     setMyId(user.id);
-    const { data: profile } = await supabase
-      .from('profiles').select('name, username').eq('id', user.id).maybeSingle();
-    setMyProfile(profile);
-    await Promise.all([fetchFriends(user.id), fetchPending(user.id)]);
+    const { data: prof } = await fetchProfile(user.id, 'name, username');
+    setMyProfile(prof);
+    await Promise.all([loadFriends(user.id), loadPending(user.id)]);
     setLoading(false);
   }
 
-  async function fetchFriends(userId) {
-    const { data } = await supabase
-      .from('friendships')
-      .select('friend_id')
-      .eq('user_id', userId)
-      .eq('status', 'accepted');
-
-    const rows = data || [];
-    if (!rows.length) { setFriends([]); return; }
-
-    const ids = rows.map(r => r.friend_id);
-    const { data: profiles } = await supabase
-      .from('profiles').select('id, name, username').in('id', ids);
-    const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
-    setFriends(rows.map(r => ({ friend_id: r.friend_id, profiles: byId[r.friend_id] || null })));
+  async function loadFriends(id) {
+    setFriends(await fetchFriends(id));
   }
 
-  async function fetchPending(userId) {
-    const { data } = await supabase
-      .from('friendships')
-      .select('user_id')
-      .eq('friend_id', userId)
-      .eq('status', 'pending');
-
-    const rows = data || [];
-    if (!rows.length) { setPending([]); return; }
-
-    const ids = rows.map(r => r.user_id);
-    const { data: profiles } = await supabase
-      .from('profiles').select('id, name, username').in('id', ids);
-    const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
-    setPending(rows.map(r => ({ user_id: r.user_id, profiles: byId[r.user_id] || null })));
+  async function loadPending(id) {
+    setPending(await fetchPendingRequests(id));
   }
 
-  async function searchUsers(text) {
-    setSearch(text);
-    if (!text.trim()) { setSearchResults([]); return; }
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, name, username')
-      .or(`username.ilike.%${text}%,name.ilike.%${text}%`)
-      .neq('id', myId)
-      .limit(10);
-    setSearchResults(data || []);
+  async function handleSearch(text) {
+    setQuery(text);
+    if (!text.trim()) { setResults([]); return; }
+    setResults(await searchUsers({ query: text, excludeId: myId }));
   }
 
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
-  }
-
-  async function sendRequest(friendId) {
-    setAddingId(friendId);
+  async function handleSendRequest(friendId) {
+    setActionId(friendId);
     try {
-      // Check if already sent
-      const { data: existing } = await supabase
-        .from('friendships')
-        .select('id, status')
-        .eq('user_id', myId)
-        .eq('friend_id', friendId)
-        .maybeSingle();
-
+      const existing = await checkFriendshipExists(myId, friendId);
       if (existing) {
         showToast(existing.status === 'accepted' ? 'Ya son amigos' : 'Solicitud ya enviada');
         return;
       }
-
-      const { error } = await supabase.from('friendships').insert({
-        user_id: myId,
-        friend_id: friendId,
-        status: 'pending',
-      });
-      if (error) throw error;
-
-      // Notify — never block the main flow if this fails
-      createNotification({
-        userId: friendId,
-        fromUserId: myId,
-        type: 'friend_request',
-        data: { name: myProfile?.name || myProfile?.username || 'Alguien' },
-      }).catch(e => console.warn('notify error:', e.message));
-
-      showToast('✓ Solicitud enviada');
-      setSearch('');
-      setSearchResults([]);
+      await sendFriendRequest({ fromUserId: myId, toUserId: friendId, fromName: myProfile?.name || myProfile?.username || 'Alguien' });
+      showToast('Solicitud enviada');
+      setQuery('');
+      setResults([]);
     } catch (e) {
       showToast('Error: ' + e.message);
     } finally {
-      setAddingId(null);
+      setActionId(null);
     }
   }
 
-  async function acceptRequest(senderId) {
-    setAddingId(senderId);
+  async function handleAccept(senderId) {
+    setActionId(senderId);
     try {
-      // Accept the incoming request
-      await supabase
-        .from('friendships')
-        .update({ status: 'accepted' })
-        .eq('user_id', senderId)
-        .eq('friend_id', myId);
-
-      // Create reverse friendship so both can see each other
-      await supabase.from('friendships').upsert({
-        user_id: myId,
-        friend_id: senderId,
-        status: 'accepted',
-      }, { onConflict: 'user_id,friend_id' });
-
-      createNotification({
-        userId: senderId,
-        fromUserId: myId,
-        type: 'friend_accepted',
-        data: { name: myProfile?.name || myProfile?.username || 'Alguien' },
-      }).catch(e => console.warn('notify error:', e.message));
-
-      showToast('✓ Ahora son amigos');
-      await Promise.all([fetchFriends(myId), fetchPending(myId)]);
+      await acceptFriendRequest({ myId, senderId, myName: myProfile?.name || myProfile?.username || 'Alguien' });
+      showToast('Ahora son amigos');
+      await Promise.all([loadFriends(myId), loadPending(myId)]);
     } catch (e) {
       showToast('Error: ' + e.message);
     } finally {
-      setAddingId(null);
+      setActionId(null);
     }
   }
 
-  async function ignoreRequest(senderId) {
-    await supabase.from('friendships').delete()
-      .eq('user_id', senderId).eq('friend_id', myId);
-    createNotification({
-      userId: senderId,
-      fromUserId: myId,
-      type: 'friend_declined',
-      data: { name: myProfile?.name || myProfile?.username || 'Alguien' },
-    }).catch(e => console.warn('notify error:', e.message));
-    fetchPending(myId);
+  async function handleDecline(senderId) {
+    await declineFriendRequest({ myId, senderId, myName: myProfile?.name || myProfile?.username || 'Alguien' });
+    loadPending(myId);
   }
 
-  function goToFriendProfile(profile) {
-    navigation.navigate('FriendProfile', { profile });
-  }
-
-  const isSearching = search.trim().length > 0;
+  const isSearching = query.trim().length > 0;
+  const listData    = isSearching ? results : friends;
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Amigos</Text>
-      </View>
+      <ScreenHeader title="Amigos" onBack={() => navigation.goBack()} />
+      <Toast message={toast} />
 
-      {/* Search */}
       <View style={styles.searchWrap}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="🔍 Buscar por nombre o @usuario"
-          value={search}
-          onChangeText={searchUsers}
-          autoCapitalize="none"
-        />
+        <View style={styles.searchRow}>
+          <Feather name="search" size={15} color={colors.muted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar por nombre o @usuario"
+            placeholderTextColor={colors.muted}
+            value={query}
+            onChangeText={handleSearch}
+            autoCapitalize="none"
+          />
+          {query ? (
+            <TouchableOpacity onPress={() => { setQuery(''); setResults([]); }}>
+              <Feather name="x" size={16} color={colors.muted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       </View>
-
-      {/* Toast */}
-      {toast ? <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View> : null}
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color="#D94F3D" /></View>
+        <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
       ) : (
         <FlatList
-          data={isSearching ? searchResults : friends}
+          data={listData}
           keyExtractor={item => item.friend_id || item.id || item.user_id}
           contentContainerStyle={styles.list}
           ListHeaderComponent={() => (
             <>
-              {/* Pending requests (only when not searching) */}
               {!isSearching && pending.length > 0 && (
                 <View style={styles.section}>
                   <Text style={styles.sectionTitle}>Solicitudes pendientes</Text>
-                  {pending.map(p => {
-                    const profile = p.profiles;
-                    return (
-                      <View key={p.user_id} style={styles.row}>
-                        <View style={styles.avatar}>
-                          <Text style={styles.avatarText}>
-                            {(profile?.name || profile?.username || '?').charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                        <View style={styles.info}>
-                          <Text style={styles.name}>{profile?.name || 'Sin nombre'}</Text>
-                          <Text style={styles.username}>@{profile?.username || 'usuario'}</Text>
-                        </View>
-                        <TouchableOpacity
-                          style={styles.acceptBtn}
-                          onPress={() => acceptRequest(p.user_id)}
-                          disabled={addingId === p.user_id}
-                        >
-                          {addingId === p.user_id
-                            ? <ActivityIndicator size="small" color="white" />
-                            : <Text style={styles.acceptBtnText}>Aceptar</Text>
-                          }
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.ignoreBtn}
-                          onPress={() => ignoreRequest(p.user_id)}
-                        >
-                          <Text style={styles.ignoreBtnText}>✕</Text>
-                        </TouchableOpacity>
-                      </View>
-                    );
-                  })}
+                  {pending.map(p => (
+                    <PendingRow
+                      key={p.user_id}
+                      profile={p.profiles}
+                      loading={actionId === p.user_id}
+                      onAccept={() => handleAccept(p.user_id)}
+                      onDecline={() => handleDecline(p.user_id)}
+                    />
+                  ))}
                 </View>
               )}
-
-              {/* Section label */}
               <Text style={styles.sectionTitle}>
-                {isSearching ? `${searchResults.length} resultados` : `Mis amigos · ${friends.length}`}
+                {isSearching
+                  ? `${results.length} resultado${results.length !== 1 ? 's' : ''}`
+                  : `Mis amigos · ${friends.length}`}
               </Text>
             </>
           )}
           ListEmptyComponent={() => (
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>👥</Text>
-              <Text style={styles.emptyTitle}>
-                {isSearching ? 'Sin resultados' : 'Aún no tienes amigos'}
-              </Text>
-              <Text style={styles.emptyText}>
-                {isSearching ? 'Prueba con otro nombre' : 'Busca personas por nombre o usuario'}
-              </Text>
-            </View>
+            <EmptyState
+              icon="users"
+              title={isSearching ? 'Sin resultados' : 'Aún no tienes amigos'}
+              text={isSearching ? 'Prueba con otro nombre' : 'Busca personas por nombre o usuario'}
+            />
           )}
           renderItem={({ item }) => {
             const profile = item.profiles || item;
             const isFriend = !isSearching;
-
             return (
-              <TouchableOpacity
-                style={styles.row}
-                onPress={() => isFriend && goToFriendProfile(profile)}
-                activeOpacity={isFriend ? 0.7 : 1}
-              >
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {(profile.name || profile.username || '?').charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <View style={styles.info}>
-                  <Text style={styles.name}>{profile.name || 'Sin nombre'}</Text>
-                  <Text style={styles.username}>@{profile.username || 'usuario'}</Text>
-                </View>
-                {isFriend ? (
-                  <TouchableOpacity style={styles.viewBtn} onPress={() => goToFriendProfile(profile)}>
-                    <Text style={styles.viewBtnText}>Ver perfil →</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={[styles.addBtn, addingId === profile.id && styles.addBtnLoading]}
-                    onPress={() => sendRequest(profile.id)}
-                    disabled={addingId === profile.id}
-                  >
-                    {addingId === profile.id
-                      ? <ActivityIndicator size="small" color="white" />
-                      : <Text style={styles.addBtnText}>+ Agregar</Text>
-                    }
-                  </TouchableOpacity>
-                )}
-              </TouchableOpacity>
+              <FriendRow
+                profile={profile}
+                isFriend={isFriend}
+                loading={actionId === profile.id}
+                onView={() => navigation.navigate('FriendProfile', { profile })}
+                onAdd={() => handleSendRequest(profile.id)}
+              />
             );
           }}
         />
@@ -316,37 +177,88 @@ export default function FriendsScreen({ navigation }) {
   );
 }
 
+function Avatar({ name }) {
+  return (
+    <View style={styles.avatar}>
+      <Text style={styles.avatarText}>{(name || '?').charAt(0).toUpperCase()}</Text>
+    </View>
+  );
+}
+
+function PendingRow({ profile, loading, onAccept, onDecline }) {
+  return (
+    <View style={styles.row}>
+      <Avatar name={profile?.name || profile?.username} />
+      <View style={styles.info}>
+        <Text style={styles.name}>{profile?.name || 'Sin nombre'}</Text>
+        <Text style={styles.username}>@{profile?.username || 'usuario'}</Text>
+      </View>
+      <TouchableOpacity style={styles.acceptBtn} onPress={onAccept} disabled={loading}>
+        {loading
+          ? <ActivityIndicator size="small" color="white" />
+          : <Text style={styles.acceptBtnText}>Aceptar</Text>
+        }
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.declineBtn} onPress={onDecline}>
+        <Feather name="x" size={14} color={colors.muted} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function FriendRow({ profile, isFriend, loading, onView, onAdd }) {
+  return (
+    <TouchableOpacity
+      style={styles.row}
+      onPress={() => isFriend && onView()}
+      activeOpacity={isFriend ? 0.7 : 1}
+    >
+      <Avatar name={profile.name || profile.username} />
+      <View style={styles.info}>
+        <Text style={styles.name}>{profile.name || 'Sin nombre'}</Text>
+        <Text style={styles.username}>@{profile.username || 'usuario'}</Text>
+      </View>
+      {isFriend ? (
+        <TouchableOpacity style={styles.viewBtn} onPress={onView}>
+          <Text style={styles.viewBtnText}>Ver perfil</Text>
+          <Feather name="chevron-right" size={13} color={colors.ink} />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity style={[styles.addBtn, loading && { opacity: 0.7 }]} onPress={onAdd} disabled={loading}>
+          {loading
+            ? <ActivityIndicator size="small" color="white" />
+            : <Text style={styles.addBtnText}>+ Agregar</Text>
+          }
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#FAFAF7' },
-  center:         { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header:         { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
-  backBtn:        { padding: 4 },
-  backText:       { fontSize: 22, color: '#1A1A18' },
-  headerTitle:    { fontSize: 17, fontWeight: '700', color: '#1A1A18' },
-  searchWrap:     { padding: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
-  searchInput:    { backgroundColor: '#FAFAF7', borderRadius: 12, padding: 12, borderWidth: 1.5, borderColor: '#E8E8E2', fontSize: 15 },
-  toast:          { backgroundColor: '#1A1A18', margin: 16, borderRadius: 12, padding: 12, alignItems: 'center' },
-  toastText:      { color: 'white', fontWeight: '600', fontSize: 14 },
-  list:           { padding: 16, gap: 10 },
-  section:        { marginBottom: 16 },
-  sectionTitle:   { fontSize: 12, fontWeight: '600', color: '#8A8A82', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
-  row:            { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#E8E8E2' },
-  avatar:         { width: 44, height: 44, borderRadius: 22, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center' },
-  avatarText:     { color: 'white', fontWeight: '700', fontSize: 17 },
-  info:           { flex: 1 },
-  name:           { fontSize: 15, fontWeight: '600', color: '#1A1A18' },
-  username:       { fontSize: 13, color: '#8A8A82' },
-  viewBtn:        { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 7 },
-  viewBtnText:    { fontSize: 13, fontWeight: '600', color: '#1A1A18' },
-  addBtn:         { backgroundColor: '#D94F3D', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 7, minWidth: 80, alignItems: 'center' },
-  addBtnLoading:  { opacity: 0.7 },
-  addBtnText:     { fontSize: 13, fontWeight: '600', color: 'white' },
-  acceptBtn:      { backgroundColor: '#2D8C5E', borderRadius: 100, paddingHorizontal: 14, paddingVertical: 7, alignItems: 'center' },
-  acceptBtnText:  { fontSize: 13, fontWeight: '600', color: 'white' },
-  ignoreBtn:      { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center' },
-  ignoreBtnText:  { fontSize: 12, color: '#8A8A82' },
-  empty:          { alignItems: 'center', paddingTop: 60 },
-  emptyIcon:      { fontSize: 48, marginBottom: 12 },
-  emptyTitle:     { fontSize: 18, fontWeight: '700', color: '#1A1A18', marginBottom: 6 },
-  emptyText:      { fontSize: 14, color: '#8A8A82', textAlign: 'center' },
+  container:   { flex: 1, backgroundColor: colors.bg },
+  center:      { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  searchWrap:  { padding: 16, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  searchRow:   { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: colors.tagBg, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10 },
+  searchInput: { flex: 1, fontSize: 14, color: colors.ink },
+
+  list:        { padding: 16, gap: 10 },
+  section:     { marginBottom: 16 },
+  sectionTitle: { fontSize: 11, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+
+  row:         { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, borderWidth: 1, borderColor: colors.border },
+  avatar:      { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
+  avatarText:  { color: 'white', fontWeight: '700', fontSize: 17 },
+  info:        { flex: 1 },
+  name:        { fontSize: 15, fontWeight: '600', color: colors.ink },
+  username:    { fontSize: 13, color: colors.muted },
+
+  viewBtn:     { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.full, paddingHorizontal: 14, paddingVertical: 7 },
+  viewBtnText: { fontSize: 13, fontWeight: '600', color: colors.ink },
+  addBtn:      { backgroundColor: colors.accent, borderRadius: radius.full, paddingHorizontal: 14, paddingVertical: 7, minWidth: 80, alignItems: 'center' },
+  addBtnText:  { fontSize: 13, fontWeight: '600', color: 'white' },
+  acceptBtn:   { backgroundColor: colors.green, borderRadius: radius.full, paddingHorizontal: 14, paddingVertical: 7, alignItems: 'center' },
+  acceptBtnText: { fontSize: 13, fontWeight: '600', color: 'white' },
+  declineBtn:  { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
 });

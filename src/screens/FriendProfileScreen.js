@@ -6,10 +6,10 @@ import {
 import { supabase } from '../lib/supabase';
 
 const LISTS = [
-  { key: 'want_to_buy',   label: 'Quiere comprar', icon: '🛍️', color: '#D94F3D', bg: '#FDE8E5' },
-  { key: 'bought',        label: 'Compró',         icon: '✅', color: '#2D8C5E', bg: '#DCF5EB' },
-  { key: 'recommend',     label: 'Recomienda',     icon: '👍', color: '#3D7DD9', bg: '#E8F0FE' },
-  { key: 'not_recommend', label: 'No recomienda',  icon: '👎', color: '#8A8A82', bg: '#F0EFE8' },
+  { key: 'want_to_buy',   label: 'Quiere comprar', icon: '🛍️', color: '#B85C45', bg: '#E8C4B8' },
+  { key: 'bought',        label: 'Compró',         icon: '✅', color: '#3E7A5E', bg: '#D4EDE3' },
+  { key: 'recommend',     label: 'Recomienda',     icon: '👍', color: '#4A6FA5', bg: '#D8E4F5' },
+  { key: 'not_recommend', label: 'No recomienda',  icon: '👎', color: '#6E6860', bg: '#F2EDE6' },
 ];
 
 export default function FriendProfileScreen({ route, navigation }) {
@@ -121,7 +121,7 @@ export default function FriendProfileScreen({ route, navigation }) {
 
       {/* Products */}
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color="#D94F3D" /></View>
+        <View style={styles.center}><ActivityIndicator color="#B85C45" /></View>
       ) : isPrivate ? (
         <View style={styles.empty}>
           <Text style={styles.emptyIcon}>🔒</Text>
@@ -173,12 +173,12 @@ export default function FriendProfileScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#FAFAF7' },
-  profileHeader:  { backgroundColor: '#1A1A18', paddingTop: 56, paddingBottom: 28, paddingHorizontal: 24 },
+  container:      { flex: 1, backgroundColor: '#F8F5F0' },
+  profileHeader:  { backgroundColor: '#1C1916', paddingTop: 56, paddingBottom: 28, paddingHorizontal: 24 },
   backBtn:        { marginBottom: 20 },
   backText:       { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '500' },
   profileTop:     { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  avatarLg:       { width: 68, height: 68, borderRadius: 34, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.2)' },
+  avatarLg:       { width: 68, height: 68, borderRadius: 34, backgroundColor: '#B85C45', alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'rgba(255,255,255,0.2)' },
   avatarLgText:   { color: 'white', fontSize: 26, fontWeight: '700' },
   profileInfo:    { flex: 1 },
   profileName:    { fontSize: 22, fontWeight: '700', color: 'white', marginBottom: 2 },
@@ -187,25 +187,25 @@ const styles = StyleSheet.create({
   stat:           { alignItems: 'center' },
   statN:          { fontSize: 18, fontWeight: '700', color: 'white' },
   statL:          { fontSize: 12, color: 'rgba(255,255,255,0.5)' },
-  tabsScroll:     { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2', flexGrow: 0 },
+  tabsScroll:     { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2DDD5', flexGrow: 0 },
   tabsContent:    { paddingHorizontal: 8 },
   tab:            { paddingHorizontal: 14, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 6, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabText:        { fontSize: 13, color: '#8A8A82' },
+  tabText:        { fontSize: 13, color: '#6E6860' },
   tabBadge:       { borderRadius: 100, paddingHorizontal: 7, paddingVertical: 2 },
   tabBadgeText:   { fontSize: 11, fontWeight: '700' },
   center:         { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty:          { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   emptyIcon:      { fontSize: 48, marginBottom: 12 },
-  emptyTitle:     { fontSize: 18, fontWeight: '700', color: '#1A1A18', marginBottom: 6 },
-  emptyText:      { fontSize: 14, color: '#8A8A82', textAlign: 'center' },
+  emptyTitle:     { fontSize: 18, fontWeight: '700', color: '#1C1916', marginBottom: 6 },
+  emptyText:      { fontSize: 14, color: '#6E6860', textAlign: 'center' },
   productList:    { padding: 16, gap: 10 },
-  productCard:    { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#E8E8E2' },
-  productImgWrap: { width: 54, height: 54, borderRadius: 12, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
+  productCard:    { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#E2DDD5' },
+  productImgWrap: { width: 54, height: 54, borderRadius: 12, backgroundColor: '#F2EDE6', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 },
   productImg:     { width: 54, height: 54 },
   productEmoji:   { fontSize: 26 },
   productInfo:    { flex: 1, minWidth: 0 },
-  productBrand:   { fontSize: 10, color: '#8A8A82', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
-  productName:    { fontSize: 14, fontWeight: '600', color: '#1A1A18', marginBottom: 4 },
+  productBrand:   { fontSize: 10, color: '#6E6860', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 },
+  productName:    { fontSize: 14, fontWeight: '600', color: '#1C1916', marginBottom: 4 },
   productPrice:   { fontSize: 16, fontWeight: '700' },
-  giftBtn:        { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center' },
+  giftBtn:        { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F2EDE6', alignItems: 'center', justifyContent: 'center' },
 });

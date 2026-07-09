@@ -88,16 +88,18 @@ export default function AppNavigator() {
   }
 
   if (loading) return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAFAF7' }}>
-      <ActivityIndicator size="large" color="#D94F3D" />
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8F5F0' }}>
+      <ActivityIndicator size="large" color="#B85C45" />
     </View>
   );
+
+  const defaultScreen = { headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: '#F8F5F0' } };
 
   // Not logged in — include PublicGift so share links work without auth
   if (!session) {
     return (
       <NavigationContainer linking={linking}>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
+        <Stack.Navigator screenOptions={defaultScreen}>
           <Stack.Screen name="Login" component={LoginScreen} />
           <Stack.Screen name="PublicGift" component={PublicGiftScreen} />
         </Stack.Navigator>
@@ -113,25 +115,25 @@ export default function AppNavigator() {
   // Logged in + onboarding done
   return (
     <NavigationContainer linking={linking}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {/* ── Core MVP screens ── */}
-        <Stack.Screen name="Home"          component={HomeScreen} />
-        <Stack.Screen name="Explore"       component={ExploreScreen} />
-        <Stack.Screen name="Product"       component={ProductScreen} />
-        <Stack.Screen name="Wishlists"        component={WishlistsScreen} />
+      <Stack.Navigator screenOptions={defaultScreen}>
+        {/* ── Core screens ── */}
+        <Stack.Screen name="Home"           component={HomeScreen} />
+        <Stack.Screen name="Explore"        component={ExploreScreen} />
+        <Stack.Screen name="Product"        component={ProductScreen} />
+        <Stack.Screen name="Wishlists"      component={WishlistsScreen} />
         <Stack.Screen name="WishlistDetail" component={WishlistDetailScreen} />
-        <Stack.Screen name="Profile"       component={ProfileScreen} />
-        <Stack.Screen name="FriendProfile" component={FriendProfileScreen} />
-        <Stack.Screen name="Friends"       component={FriendsScreen} />
-        <Stack.Screen name="Notifications" component={NotificationsScreen} />
+        <Stack.Screen name="Profile"        component={ProfileScreen} />
+        <Stack.Screen name="FriendProfile"  component={FriendProfileScreen} />
+        <Stack.Screen name="Friends"        component={FriendsScreen} />
+        <Stack.Screen name="Notifications"  component={NotificationsScreen} />
 
-        {/* ── Secondary / legacy ── */}
-        <Stack.Screen name="Search"        component={SearchScreen} />
-        <Stack.Screen name="PriceAlerts"   component={PriceAlertsScreen} />
+        {/* ── Secondary ── */}
+        <Stack.Screen name="Search"         component={SearchScreen} />
+        <Stack.Screen name="PriceAlerts"    component={PriceAlertsScreen} />
 
-        {/* ── Kept for future use (not promoted in UI) ── */}
-        <Stack.Screen name="GroupGift"     component={GroupGiftScreen} />
-        <Stack.Screen name="PublicGift"    component={PublicGiftScreen} />
+        {/* ── Future ── */}
+        <Stack.Screen name="GroupGift"      component={GroupGiftScreen} />
+        <Stack.Screen name="PublicGift"     component={PublicGiftScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

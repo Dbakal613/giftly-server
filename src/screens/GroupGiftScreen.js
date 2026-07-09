@@ -9,11 +9,11 @@ import { createNotification } from '../lib/notificationHelpers';
 const OCCASIONS = ['🎂 Cumpleaños', '🎄 Navidad', '💍 Aniversario', '🎓 Graduación', '🏠 Nuevo hogar', '🎉 Otro'];
 
 const STATUS_LABEL = {
-  paid:     { label: 'Pagado',    color: '#2D8C5E', bg: '#DCF5EB' },
-  accepted: { label: 'Confirmado', color: '#3D7DD9', bg: '#E8F0FE' },
+  paid:     { label: 'Pagado',    color: '#3E7A5E', bg: '#D4EDE3' },
+  accepted: { label: 'Confirmado', color: '#4A6FA5', bg: '#D8E4F5' },
   pending:  { label: 'Pendiente', color: '#E8A020', bg: '#FFF8E6' },
-  invited:  { label: 'Invitado',  color: '#8A8A82', bg: '#F0EFE8' },
-  declined: { label: 'Declinó',   color: '#B0AFA8', bg: '#F0EFE8' },
+  invited:  { label: 'Invitado',  color: '#6E6860', bg: '#F2EDE6' },
+  declined: { label: 'Declinó',   color: '#B0AFA8', bg: '#F2EDE6' },
 };
 
 export default function GroupGiftScreen({ route, navigation }) {
@@ -340,7 +340,7 @@ export default function GroupGiftScreen({ route, navigation }) {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Regalo grupal 🎁</Text>
           </View>
-          <View style={styles.center}><ActivityIndicator color="#D94F3D" size="large" /></View>
+          <View style={styles.center}><ActivityIndicator color="#B85C45" size="large" /></View>
         </View>
       );
     }
@@ -356,11 +356,11 @@ export default function GroupGiftScreen({ route, navigation }) {
           </View>
           <View style={styles.center}>
             <Text style={styles.emptyText}>No se pudo cargar el regalo.</Text>
-            <Text style={[styles.emptyText, { fontSize: 12, marginTop: 8, color: '#D94F3D' }]}>
+            <Text style={[styles.emptyText, { fontSize: 12, marginTop: 8, color: '#B85C45' }]}>
               Revisa la consola para ver el error exacto.
             </Text>
             <TouchableOpacity
-              style={{ marginTop: 16, backgroundColor: '#D94F3D', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 10 }}
+              style={{ marginTop: 16, backgroundColor: '#B85C45', borderRadius: 12, paddingHorizontal: 20, paddingVertical: 10 }}
               onPress={() => fetchGiftData()}
             >
               <Text style={{ color: 'white', fontWeight: '600' }}>Reintentar</Text>
@@ -501,7 +501,7 @@ export default function GroupGiftScreen({ route, navigation }) {
               <Text style={styles.modalTitle}>Invitar amigos</Text>
               <Text style={styles.modalSub}>Solo amigos que aún no están en el regalo</Text>
               {loadingFriends ? (
-                <View style={styles.center}><ActivityIndicator color="#D94F3D" /></View>
+                <View style={styles.center}><ActivityIndicator color="#B85C45" /></View>
               ) : friends.length === 0 ? (
                 <Text style={styles.noFriendsText}>No hay amigos disponibles para invitar</Text>
               ) : (
@@ -664,7 +664,7 @@ export default function GroupGiftScreen({ route, navigation }) {
             {myAmount && (
               <>
                 <Text style={styles.summaryLabel}>Tu aporte</Text>
-                <Text style={[styles.summaryValue, { color: '#2D8C5E', fontWeight: '700' }]}>
+                <Text style={[styles.summaryValue, { color: '#3E7A5E', fontWeight: '700' }]}>
                   ${parseInt(myAmount.replace(/\D/g, ''), 10).toLocaleString('es-CL')}
                 </Text>
               </>
@@ -677,10 +677,10 @@ export default function GroupGiftScreen({ route, navigation }) {
             <Text style={styles.btnPrimaryText}>Invitar amigos 👥</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.cancelBtn, { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 14, padding: 16 }]}
+            style={[styles.cancelBtn, { borderWidth: 1.5, borderColor: '#E2DDD5', borderRadius: 14, padding: 16 }]}
             onPress={() => navigation.navigate('GroupGift', { giftId: createdGiftId })}
           >
-            <Text style={[styles.cancelBtnText, { color: '#1A1A18', fontWeight: '600' }]}>Ver el regalo 🎁</Text>
+            <Text style={[styles.cancelBtnText, { color: '#1C1916', fontWeight: '600' }]}>Ver el regalo 🎁</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.cancelBtn} onPress={() => navigation.navigate('Home')}>
             <Text style={styles.cancelBtnText}>Volver al inicio</Text>
@@ -787,7 +787,7 @@ export default function GroupGiftScreen({ route, navigation }) {
               <Text style={styles.createSummaryItem}>🎉 Ocasión: <Text style={{ fontWeight: '700' }}>{occasion}</Text></Text>
               {initialProduct && (
                 <Text style={styles.createSummaryItem}>
-                  🛍️ Precio total: <Text style={{ fontWeight: '700', color: '#D94F3D' }}>
+                  🛍️ Precio total: <Text style={{ fontWeight: '700', color: '#B85C45' }}>
                     ${Math.round(initialProduct.price || 0).toLocaleString('es-CL')}
                   </Text>
                 </Text>
@@ -838,123 +838,123 @@ export default function GroupGiftScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:          { flex: 1, backgroundColor: '#FAFAF7' },
+  container:          { flex: 1, backgroundColor: '#F8F5F0' },
   center:             { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 40 },
-  emptyText:          { fontSize: 14, color: '#8A8A82', textAlign: 'center' },
+  emptyText:          { fontSize: 14, color: '#6E6860', textAlign: 'center' },
 
-  header:             { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
+  header:             { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2DDD5' },
   backBtn:            { padding: 4 },
-  backText:           { fontSize: 22, color: '#1A1A18' },
-  headerTitle:        { flex: 1, fontSize: 17, fontWeight: '700', color: '#1A1A18' },
-  shareBtn:           { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, backgroundColor: '#D94F3D' },
+  backText:           { fontSize: 22, color: '#1C1916' },
+  headerTitle:        { flex: 1, fontSize: 17, fontWeight: '700', color: '#1C1916' },
+  shareBtn:           { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100, backgroundColor: '#B85C45' },
   shareBtnText:       { fontSize: 12, color: 'white', fontWeight: '700' },
-  editBtn:            { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 100, borderWidth: 1.5, borderColor: '#E8E8E2', marginLeft: 6 },
-  editBtnText:        { fontSize: 13, color: '#1A1A18', fontWeight: '500' },
+  editBtn:            { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 100, borderWidth: 1.5, borderColor: '#E2DDD5', marginLeft: 6 },
+  editBtnText:        { fontSize: 13, color: '#1C1916', fontWeight: '500' },
 
-  toast:              { backgroundColor: '#1A1A18', margin: 16, borderRadius: 12, padding: 13, alignItems: 'center' },
+  toast:              { backgroundColor: '#1C1916', margin: 16, borderRadius: 12, padding: 13, alignItems: 'center' },
   toastText:          { color: 'white', fontWeight: '600', fontSize: 14 },
 
   scroll:             { padding: 20, gap: 14, paddingBottom: 40 },
 
   // Management cards
-  summaryCard:        { backgroundColor: '#1A1A18', borderRadius: 16, padding: 20 },
+  summaryCard:        { backgroundColor: '#1C1916', borderRadius: 16, padding: 20 },
   summaryFor:         { fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 2 },
   summaryName:        { fontSize: 22, fontWeight: '700', color: '#FFFFFF' },
   summaryOccasion:    { fontSize: 14, color: 'rgba(255,255,255,0.7)', marginTop: 6 },
   summaryMessage:     { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontStyle: 'italic', marginTop: 8 },
 
-  productCard:        { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E8E8E2' },
+  productCard:        { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E2DDD5' },
   productEmoji:       { fontSize: 36 },
-  productName:        { fontSize: 14, fontWeight: '600', color: '#1A1A18', marginBottom: 4 },
-  productStore:       { fontSize: 12, color: '#8A8A82' },
-  productPrice:       { fontSize: 18, fontWeight: '700', color: '#D94F3D' },
+  productName:        { fontSize: 14, fontWeight: '600', color: '#1C1916', marginBottom: 4 },
+  productStore:       { fontSize: 12, color: '#6E6860' },
+  productPrice:       { fontSize: 18, fontWeight: '700', color: '#B85C45' },
 
-  progressCard:       { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E8E8E2', gap: 8 },
-  progressTitle:      { fontSize: 13, fontWeight: '700', color: '#1A1A18', textTransform: 'uppercase', letterSpacing: 0.5 },
+  progressCard:       { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E2DDD5', gap: 8 },
+  progressTitle:      { fontSize: 13, fontWeight: '700', color: '#1C1916', textTransform: 'uppercase', letterSpacing: 0.5 },
   progressAmounts:    { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
-  progressCollected:  { fontSize: 28, fontWeight: '800', color: '#2D8C5E' },
-  progressTarget:     { fontSize: 14, color: '#8A8A82' },
-  progressBar:        { height: 8, backgroundColor: '#F0EFE8', borderRadius: 100, overflow: 'hidden' },
-  progressFill:       { height: '100%', backgroundColor: '#2D8C5E', borderRadius: 100 },
-  progressPct:        { fontSize: 13, color: '#8A8A82' },
+  progressCollected:  { fontSize: 28, fontWeight: '800', color: '#3E7A5E' },
+  progressTarget:     { fontSize: 14, color: '#6E6860' },
+  progressBar:        { height: 8, backgroundColor: '#F2EDE6', borderRadius: 100, overflow: 'hidden' },
+  progressFill:       { height: '100%', backgroundColor: '#3E7A5E', borderRadius: 100 },
+  progressPct:        { fontSize: 13, color: '#6E6860' },
 
-  membersCard:        { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E8E8E2', gap: 2 },
-  membersTitle:       { fontSize: 13, fontWeight: '700', color: '#1A1A18', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-  noMembers:          { fontSize: 13, color: '#8A8A82', textAlign: 'center', paddingVertical: 12 },
+  membersCard:        { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E2DDD5', gap: 2 },
+  membersTitle:       { fontSize: 13, fontWeight: '700', color: '#1C1916', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  noMembers:          { fontSize: 13, color: '#6E6860', textAlign: 'center', paddingVertical: 12 },
   memberRow:          { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#F8F8F5' },
-  memberAvatar:       { width: 38, height: 38, borderRadius: 19, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center' },
-  memberAvatarCreator:{ backgroundColor: '#1A1A18' },
+  memberAvatar:       { width: 38, height: 38, borderRadius: 19, backgroundColor: '#B85C45', alignItems: 'center', justifyContent: 'center' },
+  memberAvatarCreator:{ backgroundColor: '#1C1916' },
   memberAvatarText:   { color: 'white', fontWeight: '700', fontSize: 15 },
   memberNameRow:      { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  memberName:         { fontSize: 14, fontWeight: '600', color: '#1A1A18' },
+  memberName:         { fontSize: 14, fontWeight: '600', color: '#1C1916' },
   creatorBadge:       { fontSize: 12 },
-  youBadge:           { fontSize: 10, color: '#D94F3D', fontWeight: '700', backgroundColor: '#FDE8E5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 100 },
-  memberAmount:       { fontSize: 13, color: '#8A8A82', marginTop: 1 },
+  youBadge:           { fontSize: 10, color: '#B85C45', fontWeight: '700', backgroundColor: '#E8C4B8', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 100 },
+  memberAmount:       { fontSize: 13, color: '#6E6860', marginTop: 1 },
   statusBadge:        { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 100 },
   statusText:         { fontSize: 11, fontWeight: '600' },
 
   amountPrompt:       { backgroundColor: '#FFF8E6', borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1.5, borderColor: '#F5C842' },
   amountPromptText:   { fontSize: 14, fontWeight: '600', color: '#E8A020' },
-  inviteBtn:          { backgroundColor: '#1A1A18', borderRadius: 14, padding: 16, alignItems: 'center' },
+  inviteBtn:          { backgroundColor: '#1C1916', borderRadius: 14, padding: 16, alignItems: 'center' },
   inviteBtnText:      { color: 'white', fontSize: 15, fontWeight: '700' },
 
   // Modals
   modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalBox:           { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, margin: 16, gap: 12 },
-  modalTitle:         { fontSize: 18, fontWeight: '700', color: '#1A1A18' },
-  modalSub:           { fontSize: 13, color: '#8A8A82', marginTop: -8 },
-  noFriendsText:      { fontSize: 14, color: '#8A8A82', textAlign: 'center', paddingVertical: 24 },
-  friendRow:          { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F0EFE8' },
-  friendAvatar:       { width: 38, height: 38, borderRadius: 19, backgroundColor: '#D94F3D', alignItems: 'center', justifyContent: 'center' },
+  modalTitle:         { fontSize: 18, fontWeight: '700', color: '#1C1916' },
+  modalSub:           { fontSize: 13, color: '#6E6860', marginTop: -8 },
+  noFriendsText:      { fontSize: 14, color: '#6E6860', textAlign: 'center', paddingVertical: 24 },
+  friendRow:          { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#F2EDE6' },
+  friendAvatar:       { width: 38, height: 38, borderRadius: 19, backgroundColor: '#B85C45', alignItems: 'center', justifyContent: 'center' },
   friendAvatarText:   { color: 'white', fontWeight: '700', fontSize: 15 },
-  friendName:         { fontSize: 14, fontWeight: '600', color: '#1A1A18' },
-  friendUser:         { fontSize: 12, color: '#8A8A82' },
+  friendName:         { fontSize: 14, fontWeight: '600', color: '#1C1916' },
+  friendUser:         { fontSize: 12, color: '#6E6860' },
   checkbox:           { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#D0CFC8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  checkboxChecked:    { backgroundColor: '#D94F3D', borderColor: '#D94F3D' },
+  checkboxChecked:    { backgroundColor: '#B85C45', borderColor: '#B85C45' },
   checkmark:          { color: 'white', fontSize: 12, fontWeight: '800' },
-  amountInputWrap:    { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#E8E8E2', borderRadius: 14, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
-  amountPrefix:       { fontSize: 24, fontWeight: '700', color: '#8A8A82', marginRight: 4 },
-  amountInput:        { flex: 1, fontSize: 32, fontWeight: '700', color: '#1A1A18', paddingVertical: 14 },
-  amountHint:         { fontSize: 13, color: '#8A8A82' },
+  amountInputWrap:    { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#E2DDD5', borderRadius: 14, paddingHorizontal: 16, backgroundColor: '#FFFFFF' },
+  amountPrefix:       { fontSize: 24, fontWeight: '700', color: '#6E6860', marginRight: 4 },
+  amountInput:        { flex: 1, fontSize: 32, fontWeight: '700', color: '#1C1916', paddingVertical: 14 },
+  amountHint:         { fontSize: 13, color: '#6E6860' },
 
   // Creation
   steps:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 20, backgroundColor: '#FFFFFF' },
   stepWrap:           { flexDirection: 'row', alignItems: 'center' },
-  stepDot:            { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center' },
-  stepDotActive:      { backgroundColor: '#D94F3D' },
-  stepNum:            { fontSize: 14, fontWeight: '700', color: '#8A8A82' },
+  stepDot:            { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F2EDE6', alignItems: 'center', justifyContent: 'center' },
+  stepDotActive:      { backgroundColor: '#B85C45' },
+  stepNum:            { fontSize: 14, fontWeight: '700', color: '#6E6860' },
   stepNumActive:      { color: 'white' },
-  stepLabel:          { fontSize: 12, color: '#8A8A82', marginLeft: 6 },
-  stepLabelActive:    { color: '#D94F3D', fontWeight: '600' },
-  stepLine:           { width: 40, height: 2, backgroundColor: '#E8E8E2', marginHorizontal: 8 },
-  stepLineActive:     { backgroundColor: '#D94F3D' },
+  stepLabel:          { fontSize: 12, color: '#6E6860', marginLeft: 6 },
+  stepLabelActive:    { color: '#B85C45', fontWeight: '600' },
+  stepLine:           { width: 40, height: 2, backgroundColor: '#E2DDD5', marginHorizontal: 8 },
+  stepLineActive:     { backgroundColor: '#B85C45' },
 
   field:              { gap: 8 },
-  fieldLabel:         { fontSize: 12, fontWeight: '600', color: '#8A8A82', textTransform: 'uppercase', letterSpacing: 1 },
-  input:              { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 12, padding: 14, fontSize: 15, color: '#1A1A18', backgroundColor: '#FFFFFF' },
+  fieldLabel:         { fontSize: 12, fontWeight: '600', color: '#6E6860', textTransform: 'uppercase', letterSpacing: 1 },
+  input:              { borderWidth: 1.5, borderColor: '#E2DDD5', borderRadius: 12, padding: 14, fontSize: 15, color: '#1C1916', backgroundColor: '#FFFFFF' },
   textarea:           { minHeight: 80, textAlignVertical: 'top' },
   occasionGrid:       { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  occasionBtn:        { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 100, borderWidth: 1.5, borderColor: '#E8E8E2', backgroundColor: '#FFFFFF' },
-  occasionBtnActive:  { borderColor: '#D94F3D', backgroundColor: '#FDE8E5' },
-  occasionText:       { fontSize: 13, color: '#8A8A82' },
-  occasionTextActive: { color: '#D94F3D', fontWeight: '600' },
-  createSummaryCard:  { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E8E8E2', gap: 8 },
-  createSummaryTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A18', marginBottom: 4 },
-  createSummaryItem:  { fontSize: 14, color: '#8A8A82' },
+  occasionBtn:        { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 100, borderWidth: 1.5, borderColor: '#E2DDD5', backgroundColor: '#FFFFFF' },
+  occasionBtnActive:  { borderColor: '#B85C45', backgroundColor: '#E8C4B8' },
+  occasionText:       { fontSize: 13, color: '#6E6860' },
+  occasionTextActive: { color: '#B85C45', fontWeight: '600' },
+  createSummaryCard:  { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E2DDD5', gap: 8 },
+  createSummaryTitle: { fontSize: 15, fontWeight: '700', color: '#1C1916', marginBottom: 4 },
+  createSummaryItem:  { fontSize: 14, color: '#6E6860' },
 
-  errorBox:           { backgroundColor: '#FDE8E5', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#F5C0BB' },
-  errorText:          { color: '#D94F3D', fontSize: 13, fontWeight: '500', textAlign: 'center' },
-  btnPrimary:         { backgroundColor: '#D94F3D', borderRadius: 14, padding: 16, alignItems: 'center' },
+  errorBox:           { backgroundColor: '#E8C4B8', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#F5C0BB' },
+  errorText:          { color: '#B85C45', fontSize: 13, fontWeight: '500', textAlign: 'center' },
+  btnPrimary:         { backgroundColor: '#B85C45', borderRadius: 14, padding: 16, alignItems: 'center' },
   btnPrimaryText:     { color: 'white', fontSize: 16, fontWeight: '700' },
   cancelBtn:          { padding: 14, alignItems: 'center' },
-  cancelBtnText:      { fontSize: 14, color: '#8A8A82' },
+  cancelBtnText:      { fontSize: 14, color: '#6E6860' },
 
   // Success
   successWrap:        { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   successEmoji:       { fontSize: 72, marginBottom: 20 },
-  successTitle:       { fontSize: 26, fontWeight: '700', color: '#1A1A18', marginBottom: 10, textAlign: 'center' },
-  successSub:         { fontSize: 15, color: '#8A8A82', textAlign: 'center', marginBottom: 28, lineHeight: 22 },
-  giftSummary:        { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, width: '100%', marginBottom: 24, borderWidth: 1, borderColor: '#E8E8E2', gap: 6 },
-  summaryLabel:       { fontSize: 11, color: '#8A8A82', textTransform: 'uppercase', letterSpacing: 1, marginTop: 8 },
-  summaryValue:       { fontSize: 15, fontWeight: '600', color: '#1A1A18' },
+  successTitle:       { fontSize: 26, fontWeight: '700', color: '#1C1916', marginBottom: 10, textAlign: 'center' },
+  successSub:         { fontSize: 15, color: '#6E6860', textAlign: 'center', marginBottom: 28, lineHeight: 22 },
+  giftSummary:        { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, width: '100%', marginBottom: 24, borderWidth: 1, borderColor: '#E2DDD5', gap: 6 },
+  summaryLabel:       { fontSize: 11, color: '#6E6860', textTransform: 'uppercase', letterSpacing: 1, marginTop: 8 },
+  summaryValue:       { fontSize: 15, fontWeight: '600', color: '#1C1916' },
 });

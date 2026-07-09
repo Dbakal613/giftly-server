@@ -3,81 +3,76 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   ActivityIndicator, Image, Platform,
 } from 'react-native';
-import { supabase } from '../lib/supabase';
-import { getById, formatPrice } from '../data/products';
+import { Feather } from '@expo/vector-icons';
 import { colors, radius, shadow } from '../lib/theme';
+import { DB_ERROR } from '../constants';
+import { fetchWishlistItems, removeWishlistItem } from '../services/wishlists';
+import { getById, formatPrice } from '../data/products';
+import { supabase } from '../lib/supabase';
+import { useToast } from '../hooks/useToast';
+import Toast from '../components/Toast';
+import EmptyState from '../components/EmptyState';
+import ScreenHeader from '../components/ScreenHeader';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function WishlistDetailScreen({ route, navigation }) {
   const { wishlistId, title } = route.params;
+  const { toast, showToast } = useToast();
   const [items, setItems]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [dbAvailable, setDbAvail] = useState(true);
-  const [toast, setToast]         = useState('');
 
-  useEffect(() => { fetchItems(); }, []);
+  useEffect(() => { loadItems(); }, []);
 
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(() => setToast(''), 3000);
+  async function enrichItems(data) {
+    const uuidIds = data
+      .filter(i => UUID_RE.test(i.product_id))
+      .map(i => i.product_id);
+
+    let dbProds = {};
+    if (uuidIds.length > 0) {
+      const { data: prods } = await supabase
+        .from('products')
+        .select('id, name, brand, category, image_emoji, image_url, price, store, external_url, permalink')
+        .in('id', uuidIds);
+      for (const p of (prods || [])) dbProds[p.id] = p;
+    }
+
+    return data.map(item => ({
+      ...item,
+      product: UUID_RE.test(item.product_id)
+        ? (dbProds[item.product_id] || null)
+        : (getById(item.product_id) || null),
+    }));
   }
 
-  const fetchItems = useCallback(async () => {
+  const loadItems = useCallback(async () => {
     setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('wishlist_items')
-        .select('id, product_id, note, status, created_at')
-        .eq('wishlist_id', wishlistId)
-        .order('created_at', { ascending: false });
+    const { data, error } = await fetchWishlistItems(wishlistId);
 
-      if (error) {
-        if (error.code === '42P01' || error.message?.includes('relation')) setDbAvail(false);
-        setItems([]);
-        return;
+    if (error) {
+      if (error.code === DB_ERROR.TABLE_NOT_FOUND || error.message?.includes('relation')) {
+        setDbAvail(false);
       }
-
-      // Resolve product details: UUID → DB, string → mock catalog
-      const uuidIds = (data || [])
-        .filter(i => UUID_RE.test(i.product_id))
-        .map(i => i.product_id);
-
-      let dbProds = {};
-      if (uuidIds.length > 0) {
-        const { data: prods } = await supabase
-          .from('products')
-          .select('id, name, brand, category, image_emoji, image_url, price, store, external_url, permalink')
-          .in('id', uuidIds);
-        for (const p of (prods || [])) dbProds[p.id] = p;
-      }
-
-      setItems(
-        (data || []).map(item => ({
-          ...item,
-          product: UUID_RE.test(item.product_id)
-            ? (dbProds[item.product_id] || null)
-            : (getById(item.product_id) || null),
-        }))
-      );
-    } catch (e) {
-      console.error('WishlistDetail fetchItems:', e);
-    } finally {
-      setLoading(false);
+      setItems([]);
+    } else {
+      setItems(await enrichItems(data || []));
     }
+    setLoading(false);
   }, [wishlistId]);
 
-  async function removeItem(itemId) {
-    await supabase.from('wishlist_items').delete().eq('id', itemId);
+  async function handleRemove(itemId) {
+    await removeWishlistItem(itemId);
     setItems(prev => prev.filter(i => i.id !== itemId));
   }
 
-  async function share() {
+  async function handleShare() {
     const url = `https://giftly.app/wishlist/${wishlistId}`;
     try {
       if (Platform.OS === 'web' && navigator?.clipboard) {
         await navigator.clipboard.writeText(url);
-        showToast('Link copiado ✓');
+        showToast('Link copiado');
       } else {
         const { Share } = await import('react-native');
         await Share.share({ message: `Mira mi wishlist "${title}" en Giftly: ${url}` });
@@ -91,80 +86,48 @@ export default function WishlistDetailScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
-        <TouchableOpacity onPress={share} style={styles.shareBtn}>
-          <Text style={styles.shareBtnText}>↗</Text>
-        </TouchableOpacity>
-      </View>
+      <ScreenHeader
+        title={title}
+        onBack={() => navigation.goBack()}
+        right={
+          <TouchableOpacity onPress={handleShare} style={styles.shareBtn}>
+            <Feather name="share-2" size={17} color={colors.ink} />
+          </TouchableOpacity>
+        }
+      />
 
-      {toast ? (
-        <View style={styles.toast}><Text style={styles.toastText}>{toast}</Text></View>
-      ) : null}
+      <Toast message={toast} />
 
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
       ) : !dbAvailable ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🗄</Text>
-          <Text style={styles.emptyTitle}>Base de datos no configurada</Text>
-          <Text style={styles.emptyText}>Corre las migraciones SQL para activar wishlists.</Text>
-        </View>
+        <EmptyState
+          icon="database"
+          title="Base de datos no configurada"
+          text="Corre las migraciones SQL para activar wishlists."
+          flex
+        />
       ) : visibleItems.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🎁</Text>
-          <Text style={styles.emptyTitle}>Lista vacía</Text>
-          <Text style={styles.emptyText}>Explora productos y guárdalos en esta wishlist.</Text>
-          <TouchableOpacity style={styles.exploreBtn} onPress={() => navigation.navigate('Explore')}>
-            <Text style={styles.exploreBtnText}>✨ Explorar productos</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          icon="gift"
+          title="Lista vacía"
+          text="Explora productos y guárdalos en esta wishlist."
+          cta={{ label: 'Explorar productos', onPress: () => navigation.navigate('Explore') }}
+          flex
+        />
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-          {/* Top bar */}
           <View style={styles.topBar}>
-            <Text style={styles.countText}>{visibleItems.length} producto{visibleItems.length !== 1 ? 's' : ''}</Text>
+            <Text style={styles.countText}>
+              {visibleItems.length} producto{visibleItems.length !== 1 ? 's' : ''}
+            </Text>
             <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('Explore')}>
-              <Text style={styles.addBtnText}>＋ Agregar</Text>
+              <Feather name="plus" size={13} color="white" />
+              <Text style={styles.addBtnText}>Agregar</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Item list */}
-          {visibleItems.map(item => {
-            const p = item.product;
-            const price = p.price
-              ? (typeof p.currency !== 'undefined' ? formatPrice(p.price, p.currency) : `$${Math.round(p.price).toLocaleString('es-CL')}`)
-              : null;
-            return (
-              <TouchableOpacity
-                key={item.id}
-                style={styles.itemCard}
-                onPress={() => navigation.navigate('Product', { product: p })}
-                activeOpacity={0.85}
-              >
-                <View style={styles.itemImg}>
-                  {p.image_url ? (
-                    <Image source={{ uri: p.image_url }} style={styles.itemImgPhoto} resizeMode="contain" />
-                  ) : (
-                    <Text style={styles.itemEmoji}>{p.image_emoji || '📦'}</Text>
-                  )}
-                </View>
-                <View style={styles.itemInfo}>
-                  <Text style={styles.itemBrand} numberOfLines={1}>{p.brand || p.store}</Text>
-                  <Text style={styles.itemName} numberOfLines={2}>{p.name}</Text>
-                  {price ? <Text style={styles.itemPrice}>{price}</Text> : null}
-                  {item.note ? <Text style={styles.itemNote} numberOfLines={1}>{item.note}</Text> : null}
-                </View>
-                <TouchableOpacity style={styles.removeBtn} onPress={() => removeItem(item.id)}>
-                  <Text style={styles.removeBtnText}>✕</Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
-            );
-          })}
+          {visibleItems.map(item => <ItemCard key={item.id} item={item} onRemove={handleRemove} onPress={() => navigation.navigate('Product', { product: item.product })} />)}
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -173,44 +136,57 @@ export default function WishlistDetailScreen({ route, navigation }) {
   );
 }
 
+function ItemCard({ item, onPress, onRemove }) {
+  const p = item.product;
+  const price = p.price
+    ? (typeof p.currency !== 'undefined'
+        ? formatPrice(p.price, p.currency)
+        : `$${Math.round(p.price).toLocaleString('es-CL')}`)
+    : null;
+
+  return (
+    <TouchableOpacity style={styles.itemCard} onPress={onPress} activeOpacity={0.85}>
+      <View style={styles.itemImg}>
+        {p.image_url
+          ? <Image source={{ uri: p.image_url }} style={styles.itemImgPhoto} resizeMode="contain" />
+          : <Feather name="package" size={30} color={colors.muted} />
+        }
+      </View>
+      <View style={styles.itemInfo}>
+        <Text style={styles.itemBrand} numberOfLines={1}>{p.brand || p.store}</Text>
+        <Text style={styles.itemName} numberOfLines={2}>{p.name}</Text>
+        {price ? <Text style={styles.itemPrice}>{price}</Text> : null}
+        {item.note ? <Text style={styles.itemNote} numberOfLines={1}>{item.note}</Text> : null}
+      </View>
+      <TouchableOpacity
+        style={styles.removeBtn}
+        onPress={() => onRemove(item.id)}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Feather name="x" size={16} color={colors.muted} />
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: colors.bg },
+  container: { flex: 1, backgroundColor: colors.bg },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  shareBtn:  { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
 
-  header:         { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
-  backBtn:        { padding: 4 },
-  backText:       { fontSize: 22, color: colors.ink },
-  headerTitle:    { flex: 1, fontSize: 17, fontWeight: '700', color: colors.ink },
-  shareBtn:       { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
-  shareBtnText:   { fontSize: 16, fontWeight: '700', color: colors.ink },
+  scroll:    { padding: 16 },
+  topBar:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  countText: { fontSize: 13, color: colors.muted, fontWeight: '500' },
+  addBtn:    { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 8 },
+  addBtnText: { color: 'white', fontWeight: '700', fontSize: 13 },
 
-  toast:          { margin: 16, backgroundColor: colors.ink, borderRadius: 12, padding: 13, alignItems: 'center' },
-  toastText:      { color: 'white', fontWeight: '600', fontSize: 13 },
-
-  center:         { flex: 1, alignItems: 'center', justifyContent: 'center' },
-
-  empty:          { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  emptyIcon:      { fontSize: 52, marginBottom: 16 },
-  emptyTitle:     { fontSize: 20, fontWeight: '700', color: colors.ink, marginBottom: 8 },
-  emptyText:      { fontSize: 14, color: colors.muted, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
-  exploreBtn:     { backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: 24, paddingVertical: 14 },
-  exploreBtnText: { color: 'white', fontWeight: '700', fontSize: 15 },
-
-  scroll:         { padding: 16 },
-
-  topBar:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
-  countText:      { fontSize: 13, color: colors.muted, fontWeight: '500' },
-  addBtn:         { backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 8 },
-  addBtnText:     { color: 'white', fontWeight: '700', fontSize: 13 },
-
-  itemCard:       { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, marginBottom: 10, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', ...shadow.sm },
-  itemImg:        { width: 88, height: 88, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
-  itemImgPhoto:   { width: 88, height: 88 },
-  itemEmoji:      { fontSize: 38 },
-  itemInfo:       { flex: 1, padding: 12 },
-  itemBrand:      { fontSize: 10, color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 },
-  itemName:       { fontSize: 14, fontWeight: '600', color: colors.ink, lineHeight: 19, marginBottom: 5 },
-  itemPrice:      { fontSize: 16, fontWeight: '800', color: colors.accent },
-  itemNote:       { fontSize: 11, color: colors.muted, marginTop: 4, fontStyle: 'italic' },
-  removeBtn:      { width: 40, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
-  removeBtnText:  { fontSize: 14, color: colors.muted, fontWeight: '700' },
+  itemCard:    { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, marginBottom: 10, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', ...shadow.sm },
+  itemImg:     { width: 88, height: 88, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
+  itemImgPhoto: { width: 88, height: 88 },
+  itemInfo:    { flex: 1, padding: 12 },
+  itemBrand:   { fontSize: 10, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 3 },
+  itemName:    { fontSize: 14, fontWeight: '600', color: colors.ink, lineHeight: 19, marginBottom: 5 },
+  itemPrice:   { fontSize: 16, fontWeight: '800', color: colors.accent },
+  itemNote:    { fontSize: 11, color: colors.muted, marginTop: 4, fontStyle: 'italic' },
+  removeBtn:   { width: 44, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
 });

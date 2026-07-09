@@ -1,72 +1,70 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, TextInput } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { useState, useEffect } from 'react';
+import {
+  View, Text, FlatList, TouchableOpacity, StyleSheet,
+  ActivityIndicator, Alert, Platform,
+} from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { colors, radius } from '../lib/theme';
+import { getCurrentUser } from '../services/auth';
+import { fetchAlerts, deactivateAlert } from '../services/alerts';
+import EmptyState from '../components/EmptyState';
+import ScreenHeader from '../components/ScreenHeader';
 
 export default function PriceAlertsScreen({ navigation }) {
-  const [alerts, setAlerts] = useState([]);
+  const [alerts, setAlerts]   = useState([]);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId]   = useState(null);
 
-  useEffect(() => { fetchAlerts(); }, []);
+  useEffect(() => { init(); }, []);
 
-  async function fetchAlerts() {
-    const { data: { user } } = await supabase.auth.getUser();
-    const { data } = await supabase
-      .from('price_alerts')
-      .select('*, products(name, image_emoji, store, price)')
-      .eq('user_id', user.id)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-    setAlerts(data || []);
+  async function init() {
+    const user = await getCurrentUser();
+    setUserId(user.id);
+    await loadAlerts(user.id);
+  }
+
+  async function loadAlerts(uid) {
+    const { data } = await fetchAlerts(uid);
+    setAlerts(data);
     setLoading(false);
   }
 
-  async function deleteAlert(id) {
-    await supabase.from('price_alerts').update({ is_active: false }).eq('id', id);
-    fetchAlerts();
+  async function handleDelete(id) {
+    const doDelete = async () => {
+      await deactivateAlert(id);
+      setAlerts(prev => prev.filter(a => a.id !== id));
+    };
+    if (Platform.OS === 'web') {
+      if (!window.confirm('¿Eliminar esta alerta?')) return;
+      doDelete();
+    } else {
+      Alert.alert('Eliminar alerta', '¿Estás seguro?', [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: doDelete },
+      ]);
+    }
   }
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Alertas de precio</Text>
-      </View>
+      <ScreenHeader title="Alertas de precio" onBack={() => navigation.goBack()} />
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color="#D94F3D" /></View>
+        <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
       ) : alerts.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🔔</Text>
-          <Text style={styles.emptyTitle}>Sin alertas activas</Text>
-          <Text style={styles.emptyText}>Abre un producto y activa una alerta para que te avisemos cuando baje de precio</Text>
-        </View>
+        <EmptyState
+          icon="bell"
+          title="Sin alertas activas"
+          text="Abre un producto y activa una alerta para que te avisemos cuando baje de precio"
+          flex
+        />
       ) : (
         <FlatList
           data={alerts}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <View style={styles.alertCard}>
-              <View style={styles.alertEmoji}>
-                <Text style={styles.alertEmojiText}>{item.products?.image_emoji || '📦'}</Text>
-              </View>
-              <View style={styles.alertInfo}>
-                <Text style={styles.alertName} numberOfLines={2}>{item.products?.name}</Text>
-                <Text style={styles.alertStore}>{item.products?.store}</Text>
-                <View style={styles.alertPrices}>
-                  <Text style={styles.alertCurrent}>Precio actual: <Text style={styles.alertCurrentPrice}>${item.products?.price?.toLocaleString('es-CL')}</Text></Text>
-                  <Text style={styles.alertTarget}>Mi alerta: <Text style={styles.alertTargetPrice}>${item.target_price?.toLocaleString('es-CL')}</Text></Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => Alert.alert('Eliminar alerta', '¿Estás segura?', [
-                { text: 'Cancelar', style: 'cancel' },
-                { text: 'Eliminar', style: 'destructive', onPress: () => deleteAlert(item.id) }
-              ])}>
-                <Text style={styles.deleteBtn}>🗑️</Text>
-              </TouchableOpacity>
-            </View>
+            <AlertCard item={item} onDelete={() => handleDelete(item.id)} />
           )}
         />
       )}
@@ -74,28 +72,49 @@ export default function PriceAlertsScreen({ navigation }) {
   );
 }
 
+function AlertCard({ item, onDelete }) {
+  const p = item.products;
+  return (
+    <View style={styles.alertCard}>
+      <View style={styles.alertIcon}>
+        <Feather name="package" size={22} color={colors.muted} />
+      </View>
+      <View style={styles.alertInfo}>
+        <Text style={styles.alertName} numberOfLines={2}>{p?.name}</Text>
+        <Text style={styles.alertStore}>{p?.store}</Text>
+        <View style={styles.alertPrices}>
+          <Text style={styles.alertLabel}>
+            Precio actual: <Text style={styles.alertCurrentPrice}>${p?.price?.toLocaleString('es-CL')}</Text>
+          </Text>
+          <Text style={styles.alertLabel}>
+            Mi alerta: <Text style={styles.alertTargetPrice}>${item.target_price?.toLocaleString('es-CL')}</Text>
+          </Text>
+        </View>
+      </View>
+      <TouchableOpacity
+        style={styles.deleteBtn}
+        onPress={onDelete}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Feather name="trash-2" size={16} color={colors.accent} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAF7' },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
-  backBtn: { padding: 4 },
-  backText: { fontSize: 22, color: '#1A1A18' },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A1A18' },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  emptyIcon: { fontSize: 56, marginBottom: 16 },
-  emptyTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A18', marginBottom: 8 },
-  emptyText: { fontSize: 14, color: '#8A8A82', textAlign: 'center', lineHeight: 22 },
-  list: { padding: 16, gap: 12 },
-  alertCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#E8E8E2' },
-  alertEmoji: { width: 52, height: 52, borderRadius: 12, backgroundColor: '#F0EFE8', alignItems: 'center', justifyContent: 'center' },
-  alertEmojiText: { fontSize: 26 },
-  alertInfo: { flex: 1 },
-  alertName: { fontSize: 13, fontWeight: '600', color: '#1A1A18', marginBottom: 2 },
-  alertStore: { fontSize: 11, color: '#8A8A82', marginBottom: 6 },
-  alertPrices: { gap: 2 },
-  alertCurrent: { fontSize: 12, color: '#8A8A82' },
-  alertCurrentPrice: { color: '#1A1A18', fontWeight: '600' },
-  alertTarget: { fontSize: 12, color: '#8A8A82' },
-  alertTargetPrice: { color: '#2D8C5E', fontWeight: '700' },
-  deleteBtn: { fontSize: 20, padding: 4 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  center:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  list:      { padding: 16, gap: 12 },
+
+  alertCard:         { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, borderWidth: 1, borderColor: colors.border },
+  alertIcon:         { width: 52, height: 52, borderRadius: 12, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
+  alertInfo:         { flex: 1 },
+  alertName:         { fontSize: 13, fontWeight: '600', color: colors.ink, marginBottom: 2 },
+  alertStore:        { fontSize: 11, color: colors.muted, marginBottom: 6 },
+  alertPrices:       { gap: 2 },
+  alertLabel:        { fontSize: 12, color: colors.muted },
+  alertCurrentPrice: { color: colors.ink, fontWeight: '600' },
+  alertTargetPrice:  { color: colors.green, fontWeight: '700' },
+  deleteBtn:         { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
 });

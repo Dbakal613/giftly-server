@@ -2,8 +2,14 @@ import { useState, useEffect } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { colors, radius } from '../lib/theme';
 import { createNotification, markAllRead, notificationLabel } from '../lib/notificationHelpers';
+import { getCurrentUser } from '../services/auth';
+import { fetchProfile } from '../services/profiles';
+import EmptyState from '../components/EmptyState';
+import ScreenHeader from '../components/ScreenHeader';
 
 export default function NotificationsScreen({ navigation }) {
   const [notifications, setNotifications] = useState([]);
@@ -15,16 +21,15 @@ export default function NotificationsScreen({ navigation }) {
   useEffect(() => { init(); }, []);
 
   async function init() {
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     setMyId(user.id);
-    const { data: profile } = await supabase
-      .from('profiles').select('name, username').eq('id', user.id).maybeSingle();
+    const { data: profile } = await fetchProfile(user.id, 'name, username');
     setMyProfile(profile);
-    await fetchNotifications(user.id);
+    await loadNotifications(user.id);
     await markAllRead(user.id);
   }
 
-  async function fetchNotifications(userId) {
+  async function loadNotifications(userId) {
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
@@ -32,12 +37,11 @@ export default function NotificationsScreen({ navigation }) {
       .order('created_at', { ascending: false })
       .limit(50);
 
-    if (error) { console.error('fetchNotifications error:', error.message); }
+    if (error) { console.error('loadNotifications error:', error.message); setLoading(false); return; }
 
     const rows = data || [];
     if (!rows.length) { setNotifications([]); setLoading(false); return; }
 
-    // Fetch sender profiles separately to avoid FK constraint name issues
     const senderIds = [...new Set(rows.map(n => n.from_user_id).filter(Boolean))];
     const { data: profiles } = await supabase
       .from('profiles')
@@ -45,12 +49,11 @@ export default function NotificationsScreen({ navigation }) {
       .in('id', senderIds);
 
     const byId = Object.fromEntries((profiles || []).map(p => [p.id, p]));
-
     setNotifications(rows.map(n => ({ ...n, profiles: byId[n.from_user_id] || null })));
     setLoading(false);
   }
 
-  // ── Friend request ────────────────────────────────────────────────────────────
+  const myName = myProfile?.name || myProfile?.username || 'Alguien';
 
   async function acceptRequest(notif) {
     setActioningId(notif.id);
@@ -63,85 +66,60 @@ export default function NotificationsScreen({ navigation }) {
         { user_id: myId, friend_id: senderId, status: 'accepted' },
         { onConflict: 'user_id,friend_id' }
       );
-      createNotification({
-        userId: senderId, fromUserId: myId, type: 'friend_accepted',
-        data: { name: myProfile?.name || myProfile?.username || 'Alguien' },
-      }).catch(() => {});
+      createNotification({ userId: senderId, fromUserId: myId, type: 'friend_accepted', data: { name: myName } }).catch(() => {});
       await supabase.from('notifications').delete().eq('id', notif.id);
-      await fetchNotifications(myId);
-    } catch (e) { console.error('acceptRequest error:', e); }
+      await loadNotifications(myId);
+    } catch (e) { console.error('acceptRequest:', e); }
     finally { setActioningId(null); }
   }
 
   async function declineRequest(notif) {
     setActioningId(notif.id);
     try {
-      await supabase.from('friendships')
-        .delete().eq('user_id', notif.from_user_id).eq('friend_id', myId);
-      createNotification({
-        userId: notif.from_user_id, fromUserId: myId, type: 'friend_declined',
-        data: { name: myProfile?.name || myProfile?.username || 'Alguien' },
-      }).catch(() => {});
+      await supabase.from('friendships').delete().eq('user_id', notif.from_user_id).eq('friend_id', myId);
+      createNotification({ userId: notif.from_user_id, fromUserId: myId, type: 'friend_declined', data: { name: myName } }).catch(() => {});
       await supabase.from('notifications').delete().eq('id', notif.id);
-      await fetchNotifications(myId);
-    } catch (e) { console.error('declineRequest error:', e); }
+      await loadNotifications(myId);
+    } catch (e) { console.error('declineRequest:', e); }
     finally { setActioningId(null); }
   }
-
-  // ── Gift invite ───────────────────────────────────────────────────────────────
 
   async function acceptGiftInvite(notif) {
     setActioningId(notif.id);
     try {
       const giftId = notif.data?.gift_id;
       if (!giftId) return;
-
-      // Join as member (accept the invitation)
       await supabase.from('group_gift_members').upsert(
         { group_gift_id: giftId, user_id: myId, amount: 0, status: 'accepted' },
         { onConflict: 'group_gift_id,user_id' }
       );
-
       createNotification({
         userId: notif.from_user_id, fromUserId: myId, type: 'gift_invite_accepted',
-        data: {
-          name:           myProfile?.name || myProfile?.username || 'Alguien',
-          recipient_name: notif.data?.recipient_name,
-          gift_id:        giftId,
-        },
+        data: { name: myName, recipient_name: notif.data?.recipient_name, gift_id: giftId },
       }).catch(() => {});
-
       await supabase.from('notifications').delete().eq('id', notif.id);
-      await fetchNotifications(myId);
+      await loadNotifications(myId);
       navigation.navigate('GroupGift', { giftId });
-    } catch (e) { console.error('acceptGiftInvite error:', e); }
+    } catch (e) { console.error('acceptGiftInvite:', e); }
     finally { setActioningId(null); }
   }
 
   async function declineGiftInvite(notif) {
     setActioningId(notif.id);
     try {
-      // Mark the member row as declined
       await supabase.from('group_gift_members')
         .update({ status: 'declined' })
         .eq('group_gift_id', notif.data?.gift_id)
         .eq('user_id', myId);
-
       createNotification({
         userId: notif.from_user_id, fromUserId: myId, type: 'gift_invite_declined',
-        data: {
-          name:           myProfile?.name || myProfile?.username || 'Alguien',
-          recipient_name: notif.data?.recipient_name,
-        },
+        data: { name: myName, recipient_name: notif.data?.recipient_name },
       }).catch(() => {});
-
       await supabase.from('notifications').delete().eq('id', notif.id);
-      await fetchNotifications(myId);
-    } catch (e) { console.error('declineGiftInvite error:', e); }
+      await loadNotifications(myId);
+    } catch (e) { console.error('declineGiftInvite:', e); }
     finally { setActioningId(null); }
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────────
 
   function timeAgo(dateStr) {
     const diff = Date.now() - new Date(dateStr).getTime();
@@ -155,36 +133,28 @@ export default function NotificationsScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Notificaciones</Text>
-      </View>
+      <ScreenHeader title="Notificaciones" onBack={() => navigation.goBack()} />
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator color="#D94F3D" /></View>
+        <View style={styles.center}><ActivityIndicator color={colors.accent} /></View>
+      ) : notifications.length === 0 ? (
+        <EmptyState
+          icon="bell"
+          title="Sin notificaciones"
+          text="Aquí verás solicitudes de amistad e invitaciones a regalos"
+          flex
+        />
       ) : (
         <FlatList
           data={notifications}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.list}
-          ListEmptyComponent={() => (
-            <View style={styles.empty}>
-              <Text style={styles.emptyIcon}>🔔</Text>
-              <Text style={styles.emptyTitle}>Sin notificaciones</Text>
-              <Text style={styles.emptyText}>Aquí verás solicitudes de amistad e invitaciones a regalos</Text>
-            </View>
-          )}
           renderItem={({ item }) => {
             const enriched = {
               ...item,
-              data: {
-                ...item.data,
-                name: item.profiles?.name || item.profiles?.username || item.data?.name,
-              },
+              data: { ...item.data, name: item.profiles?.name || item.profiles?.username || item.data?.name },
             };
-            const { icon, text } = notificationLabel(enriched);
+            const { text } = notificationLabel(enriched);
             const isRequest    = item.type === 'friend_request';
             const isGiftInvite = item.type === 'gift_invite';
             const actioning    = actioningId === item.id;
@@ -192,32 +162,28 @@ export default function NotificationsScreen({ navigation }) {
             return (
               <View style={[styles.notifItem, !item.is_read && styles.notifUnread]}>
                 <View style={[styles.notifIcon, isGiftInvite && styles.notifIconGift]}>
-                  <Text style={styles.notifIconText}>{icon}</Text>
+                  <Feather
+                    name={isGiftInvite ? 'gift' : isRequest ? 'user-plus' : 'bell'}
+                    size={18}
+                    color={isGiftInvite ? colors.green : colors.accent}
+                  />
                 </View>
                 <View style={styles.notifContent}>
                   <Text style={styles.notifText}>{text}</Text>
                   {isGiftInvite && item.data?.product_name && (
-                    <Text style={styles.notifMeta}>🛍️ {item.data.product_name}</Text>
+                    <Text style={styles.notifMeta}>{item.data.product_name}</Text>
                   )}
                   <Text style={styles.notifTime}>{timeAgo(item.created_at)}</Text>
 
                   {isRequest && (
                     <View style={styles.actions}>
-                      <TouchableOpacity
-                        style={styles.acceptBtn}
-                        onPress={() => acceptRequest(item)}
-                        disabled={actioning}
-                      >
+                      <TouchableOpacity style={styles.acceptBtn} onPress={() => acceptRequest(item)} disabled={actioning}>
                         {actioning
                           ? <ActivityIndicator size="small" color="white" />
-                          : <Text style={styles.acceptBtnText}>✓ Aceptar</Text>
+                          : <Text style={styles.acceptBtnText}>Aceptar</Text>
                         }
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.declineBtn}
-                        onPress={() => declineRequest(item)}
-                        disabled={actioning}
-                      >
+                      <TouchableOpacity style={styles.declineBtn} onPress={() => declineRequest(item)} disabled={actioning}>
                         <Text style={styles.declineBtnText}>Rechazar</Text>
                       </TouchableOpacity>
                     </View>
@@ -225,21 +191,13 @@ export default function NotificationsScreen({ navigation }) {
 
                   {isGiftInvite && (
                     <View style={styles.actions}>
-                      <TouchableOpacity
-                        style={styles.acceptBtn}
-                        onPress={() => acceptGiftInvite(item)}
-                        disabled={actioning}
-                      >
+                      <TouchableOpacity style={styles.acceptBtn} onPress={() => acceptGiftInvite(item)} disabled={actioning}>
                         {actioning
                           ? <ActivityIndicator size="small" color="white" />
-                          : <Text style={styles.acceptBtnText}>🎁 Unirme</Text>
+                          : <Text style={styles.acceptBtnText}>Unirme</Text>
                         }
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.declineBtn}
-                        onPress={() => declineGiftInvite(item)}
-                        disabled={actioning}
-                      >
+                      <TouchableOpacity style={styles.declineBtn} onPress={() => declineGiftInvite(item)} disabled={actioning}>
                         <Text style={styles.declineBtnText}>Rechazar</Text>
                       </TouchableOpacity>
                     </View>
@@ -255,29 +213,22 @@ export default function NotificationsScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: '#FAFAF7' },
-  center:          { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header:          { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E8E8E2' },
-  backBtn:         { padding: 4 },
-  backText:        { fontSize: 22, color: '#1A1A18' },
-  headerTitle:     { fontSize: 17, fontWeight: '700', color: '#1A1A18' },
-  list:            { padding: 16, gap: 8 },
-  empty:           { alignItems: 'center', paddingTop: 80 },
-  emptyIcon:       { fontSize: 48, marginBottom: 12 },
-  emptyTitle:      { fontSize: 18, fontWeight: '700', color: '#1A1A18', marginBottom: 6 },
-  emptyText:       { fontSize: 14, color: '#8A8A82', textAlign: 'center', paddingHorizontal: 24 },
-  notifItem:       { flexDirection: 'row', gap: 12, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#E8E8E2' },
-  notifUnread:     { backgroundColor: '#FFF8F7', borderColor: '#FBD0CB' },
-  notifIcon:       { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FDE8E5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  notifIconGift:   { backgroundColor: '#E8F5EE' },
-  notifIconText:   { fontSize: 20 },
-  notifContent:    { flex: 1 },
-  notifText:       { fontSize: 14, fontWeight: '500', color: '#1A1A18', lineHeight: 20, marginBottom: 2 },
-  notifMeta:       { fontSize: 12, color: '#8A8A82', marginBottom: 4 },
-  notifTime:       { fontSize: 12, color: '#8A8A82', marginBottom: 10 },
-  actions:         { flexDirection: 'row', gap: 8 },
-  acceptBtn:       { backgroundColor: '#2D8C5E', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center', minWidth: 80 },
-  acceptBtnText:   { color: 'white', fontWeight: '600', fontSize: 13 },
-  declineBtn:      { borderWidth: 1.5, borderColor: '#E8E8E2', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 8 },
-  declineBtnText:  { color: '#8A8A82', fontWeight: '500', fontSize: 13 },
+  container:      { flex: 1, backgroundColor: colors.bg },
+  center:         { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  list:           { padding: 16, gap: 8 },
+
+  notifItem:      { flexDirection: 'row', gap: 12, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, borderWidth: 1, borderColor: colors.border },
+  notifUnread:    { backgroundColor: '#F5EBE8', borderColor: colors.accentLight },
+  notifIcon:      { width: 44, height: 44, borderRadius: 12, backgroundColor: colors.redBg, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  notifIconGift:  { backgroundColor: colors.greenBg },
+  notifContent:   { flex: 1 },
+  notifText:      { fontSize: 14, fontWeight: '500', color: colors.ink, lineHeight: 20, marginBottom: 2 },
+  notifMeta:      { fontSize: 12, color: colors.muted, marginBottom: 4 },
+  notifTime:      { fontSize: 12, color: colors.muted, marginBottom: 10 },
+
+  actions:        { flexDirection: 'row', gap: 8 },
+  acceptBtn:      { backgroundColor: colors.green, borderRadius: radius.full, paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center', minWidth: 80 },
+  acceptBtnText:  { color: 'white', fontWeight: '600', fontSize: 13 },
+  declineBtn:     { borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.full, paddingHorizontal: 16, paddingVertical: 8 },
+  declineBtnText: { color: colors.muted, fontWeight: '500', fontSize: 13 },
 });
