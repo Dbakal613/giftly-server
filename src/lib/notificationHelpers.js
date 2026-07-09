@@ -29,12 +29,12 @@ export function notificationLabel(notif) {
   const name      = notif.data?.name || notif.data?.username || 'Alguien';
   const recipient = notif.data?.recipient_name || notif.data?.recipient || 'alguien';
   switch (notif.type) {
-    case 'friend_request':         return { icon: '👋', text: `${name} te envió una solicitud de amistad` };
-    case 'friend_accepted':        return { icon: '🎉', text: `${name} aceptó tu solicitud de amistad` };
-    case 'friend_declined':        return { icon: '❌', text: `${name} rechazó tu solicitud de amistad` };
-    case 'gift_invite':            return { icon: '🎁', text: `${name} te invitó al regalo de ${recipient}` };
-    case 'gift_invite_accepted':   return { icon: '🥳', text: `${name} se unió al regalo de ${recipient}` };
-    case 'gift_invite_declined':   return { icon: '👋', text: `${name} no pudo unirse al regalo de ${recipient}` };
-    default:                       return { icon: '🔔', text: notif.data?.message || 'Nueva notificación' };
+    case 'friend_request':         return { icon: 'user-plus',    text: `${name} te envió una solicitud de amistad` };
+    case 'friend_accepted':        return { icon: 'user-check',   text: `${name} aceptó tu solicitud de amistad` };
+    case 'friend_declined':        return { icon: 'user-x',       text: `${name} rechazó tu solicitud de amistad` };
+    case 'gift_invite':            return { icon: 'gift',         text: `${name} te invitó al regalo de ${recipient}` };
+    case 'gift_invite_accepted':   return { icon: 'check-circle', text: `${name} se unió al regalo de ${recipient}` };
+    case 'gift_invite_declined':   return { icon: 'x-circle',     text: `${name} no pudo unirse al regalo de ${recipient}` };
+    default:                       return { icon: 'bell',         text: notif.data?.message || 'Nueva notificación' };
   }
 }

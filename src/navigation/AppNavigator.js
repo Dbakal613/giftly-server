@@ -19,6 +19,7 @@ import PublicGiftScreen from '../screens/PublicGiftScreen';
 import ExploreScreen from '../screens/ExploreScreen';
 import WishlistsScreen from '../screens/WishlistsScreen';
 import WishlistDetailScreen from '../screens/WishlistDetailScreen';
+import RecommendationsScreen from '../screens/RecommendationsScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -128,8 +129,9 @@ export default function AppNavigator() {
         <Stack.Screen name="Notifications"  component={NotificationsScreen} />
 
         {/* ── Secondary ── */}
-        <Stack.Screen name="Search"         component={SearchScreen} />
-        <Stack.Screen name="PriceAlerts"    component={PriceAlertsScreen} />
+        <Stack.Screen name="Search"          component={SearchScreen} />
+        <Stack.Screen name="PriceAlerts"     component={PriceAlertsScreen} />
+        <Stack.Screen name="Recommendations" component={RecommendationsScreen} />
 
         {/* ── Future ── */}
         <Stack.Screen name="GroupGift"      component={GroupGiftScreen} />

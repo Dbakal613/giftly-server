@@ -17,7 +17,7 @@ import ScreenHeader from '../components/ScreenHeader';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function WishlistDetailScreen({ route, navigation }) {
-  const { wishlistId, title } = route.params;
+  const { wishlistId, title, readOnly = false } = route.params;
   const { toast, showToast } = useToast();
   const [items, setItems]         = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -90,9 +90,11 @@ export default function WishlistDetailScreen({ route, navigation }) {
         title={title}
         onBack={() => navigation.goBack()}
         right={
-          <TouchableOpacity onPress={handleShare} style={styles.shareBtn}>
-            <Feather name="share-2" size={17} color={colors.ink} />
-          </TouchableOpacity>
+          !readOnly ? (
+            <TouchableOpacity onPress={handleShare} style={styles.shareBtn}>
+              <Feather name="share-2" size={17} color={colors.ink} />
+            </TouchableOpacity>
+          ) : null
         }
       />
 
@@ -121,13 +123,15 @@ export default function WishlistDetailScreen({ route, navigation }) {
             <Text style={styles.countText}>
               {visibleItems.length} producto{visibleItems.length !== 1 ? 's' : ''}
             </Text>
-            <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('Explore')}>
-              <Feather name="plus" size={13} color="white" />
-              <Text style={styles.addBtnText}>Agregar</Text>
-            </TouchableOpacity>
+            {!readOnly && (
+              <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('Explore')}>
+                <Feather name="plus" size={13} color="white" />
+                <Text style={styles.addBtnText}>Agregar</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          {visibleItems.map(item => <ItemCard key={item.id} item={item} onRemove={handleRemove} onPress={() => navigation.navigate('Product', { product: item.product })} />)}
+          {visibleItems.map(item => <ItemCard key={item.id} item={item} onRemove={handleRemove} readOnly={readOnly} onPress={() => navigation.navigate('Product', { product: item.product })} />)}
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -136,7 +140,7 @@ export default function WishlistDetailScreen({ route, navigation }) {
   );
 }
 
-function ItemCard({ item, onPress, onRemove }) {
+function ItemCard({ item, onPress, onRemove, readOnly }) {
   const p = item.product;
   const price = p.price
     ? (typeof p.currency !== 'undefined'
@@ -158,13 +162,15 @@ function ItemCard({ item, onPress, onRemove }) {
         {price ? <Text style={styles.itemPrice}>{price}</Text> : null}
         {item.note ? <Text style={styles.itemNote} numberOfLines={1}>{item.note}</Text> : null}
       </View>
-      <TouchableOpacity
-        style={styles.removeBtn}
-        onPress={() => onRemove(item.id)}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Feather name="x" size={16} color={colors.muted} />
-      </TouchableOpacity>
+      {!readOnly && (
+        <TouchableOpacity
+          style={styles.removeBtn}
+          onPress={() => onRemove(item.id)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="x" size={16} color={colors.muted} />
+        </TouchableOpacity>
+      )}
     </TouchableOpacity>
   );
 }

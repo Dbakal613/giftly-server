@@ -3,9 +3,11 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, Modal, Image, ScrollView, Dimensions, Linking,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import axios from 'axios';
 import { supabase } from '../lib/supabase';
 import { SERVER_URL } from '../lib/config';
+import { colors, radius } from '../lib/theme';
 
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;
@@ -20,11 +22,10 @@ const STORE = {
 };
 
 function storeStyle(source) {
-  return STORE[source] || { color: '#6E6860', bg: '#F2EDE6', label: source };
+  return STORE[source] || { color: colors.muted, bg: colors.tagBg, label: source };
 }
 
 // ── Category browsing ─────────────────────────────────────────────────────────
-// Uses DummyJSON category slugs (guaranteed to have products)
 const CATEGORIES = [
   { label: 'Todo',        slugs: ['smartphones', 'fragrances', 'mens-shoes'] },
   { label: 'Tecnología',  slugs: ['smartphones', 'laptops', 'tablets'] },
@@ -37,7 +38,6 @@ const CATEGORIES = [
 
 // ── Data fetching ─────────────────────────────────────────────────────────────
 
-// Multi-retailer search (for explicit text queries)
 async function fetchMultiRetailer(q, limit = 20) {
   const res = await axios.get(`${SERVER_URL}/search`, {
     params: { q, limit },
@@ -46,7 +46,6 @@ async function fetchMultiRetailer(q, limit = 20) {
   return res.data?.results || [];
 }
 
-// DummyJSON product mapper — USD → CLP (approximate ×950)
 function mapDummy(item) {
   return {
     externalId:    `d${item.id}`,
@@ -63,7 +62,6 @@ function mapDummy(item) {
   };
 }
 
-// Category browsing — DummyJSON category endpoint (guaranteed results per category)
 async function fetchByCategory(slug, limit = 10) {
   try {
     const { data } = await axios.get(`https://dummyjson.com/products/category/${slug}`, {
@@ -77,8 +75,6 @@ async function fetchByCategory(slug, limit = 10) {
   }
 }
 
-// Text search fallback via DummyJSON search
-// MercadoLibre now requires OAuth — will be restored once ML credentials are configured.
 async function fetchML(q, limit = 10) {
   try {
     const { data } = await axios.get('https://dummyjson.com/products/search', {
@@ -92,14 +88,12 @@ async function fetchML(q, limit = 10) {
   }
 }
 
-// Unified item key across all sources
 function itemKey(item) {
   if (item.externalId) return `${item.source}_${item.externalId}`;
   if (item.mlId)       return `MercadoLibre_${item.mlId}`;
   return `${item.source || 'x'}_${item.name}`;
 }
 
-// Map item to ProductScreen-compatible shape
 function toProductShape(item) {
   return {
     name:        item.name,
@@ -108,7 +102,7 @@ function toProductShape(item) {
     price:       item.price,
     currency:    item.currency || 'CLP',
     image_url:   item.imageUrl || item.image_url || null,
-    image_emoji: '📦',
+    image_emoji: '',
     category:    item.category || '',
     permalink:   item.permalink || null,
   };
@@ -123,9 +117,9 @@ const STOP = new Set([
 
 function normalizeToken(w) {
   return w
-    .normalize('NFD').replace(/[̀-ͯ]/g, '') // strip accents
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase()
-    .replace(/(\d+)(ra|da|ro|do|ta|to|ma|mo|er)$/i, '$1'); // "2da" → "2"
+    .replace(/(\d+)(ra|da|ro|do|ta|to|ma|mo|er)$/i, '$1');
 }
 
 function getGroupKey(name, brand) {
@@ -136,7 +130,6 @@ function getGroupKey(name, brand) {
     .map(normalizeToken)
     .filter(w => w.length > 1 && !STOP.has(w));
 
-  // Prepend brand if it's meaningful and not already first token
   const withBrand = brandNorm && tokens[0] !== brandNorm
     ? [brandNorm, ...tokens]
     : tokens;
@@ -154,7 +147,6 @@ function groupItems(items) {
     }
     map.get(key).items.push(item);
   }
-  // Sort groups: most store diversity first, then by item count
   return [...map.values()].sort((a, b) => {
     const aStores = new Set(a.items.map(i => i.source)).size;
     const bStores = new Set(b.items.map(i => i.source)).size;
@@ -177,13 +169,12 @@ export default function SearchScreen({ navigation }) {
   const [query, setQuery]                   = useState('');
   const [groups, setGroups]                 = useState([]);
   const [loading, setLoading]               = useState(true);
-  const [searching, setSearching]           = useState(false); // multi-retailer in progress
+  const [searching, setSearching]           = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('Todo');
   const [isTextSearch, setIsTextSearch]     = useState(false);
   const [fetchError, setFetchError]         = useState(null);
   const [activeSources, setActiveSources]   = useState([]);
 
-  // Selection
   const [selected, setSelected]             = useState(new Map());
   const [addingBulk, setAddingBulk]         = useState(false);
   const [showBulkModal, setShowBulkModal]   = useState(false);
@@ -200,7 +191,6 @@ export default function SearchScreen({ navigation }) {
     setActiveSources(sources.length ? sources : [...new Set(deduped.map(i => i.source))]);
   }
 
-  // Category browsing — ML only (fast, ~2-3s)
   async function loadCategory(cat) {
     setLoading(true);
     setFetchError(null);
@@ -220,7 +210,6 @@ export default function SearchScreen({ navigation }) {
     }
   }
 
-  // Text search — tries server first, falls back to DummyJSON if server returns nothing
   async function search(overrideQuery) {
     const q = (overrideQuery || query).trim();
     if (!q) return;
@@ -251,7 +240,6 @@ export default function SearchScreen({ navigation }) {
     }
   }
 
-  // ── Selection logic ───────────────────────────────────────────────────────
   function toggleSelect(item) {
     const k = itemKey(item);
     setSelected(prev => {
@@ -261,7 +249,6 @@ export default function SearchScreen({ navigation }) {
     });
   }
 
-  // ── Bulk add to "Quiero comprar" ──────────────────────────────────────────
   async function addBulkToList() {
     setAddingBulk(true);
     const resolved = new Map();
@@ -289,7 +276,7 @@ export default function SearchScreen({ navigation }) {
               store,
               brand:       product.brand || '',
               category:    product.category || '',
-              image_emoji: '📦',
+              image_emoji: '',
             }).select('id').single();
             productId = np?.id;
           }
@@ -309,7 +296,6 @@ export default function SearchScreen({ navigation }) {
     finally { setAddingBulk(false); }
   }
 
-  // ── Price alerts for selected group ──────────────────────────────────────
   async function saveAlerts() {
     const price = parseInt(bulkPrice.replace(/\D/g, ''), 10);
     if (price) {
@@ -337,29 +323,27 @@ export default function SearchScreen({ navigation }) {
     setSelected(new Map());
     setBulkPrice('');
     setResolvedIds(new Map());
-    setSuccessMsg(`✓ ${count} producto${count !== 1 ? 's' : ''} agregado${count !== 1 ? 's' : ''} a Quiero comprar`);
+    setSuccessMsg(`${count} producto${count !== 1 ? 's' : ''} agregado${count !== 1 ? 's' : ''} a la lista`);
     setTimeout(() => setSuccessMsg(''), 4000);
   }
 
-  // ── Derived state ─────────────────────────────────────────────────────────
   const inSelectionMode = selected.size > 0;
   const totalItems = groups.reduce((s, g) => s + g.items.length, 0);
   const resultsLabel = isTextSearch
     ? `${totalItems} resultados para "${query}"`
     : `${totalItems} productos · ${selectedCategory}`;
 
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>←</Text>
+          <Feather name="arrow-left" size={22} color={colors.ink} />
         </TouchableOpacity>
         <TextInput
           style={styles.searchInput}
           placeholder="Buscar productos..."
+          placeholderTextColor={colors.muted}
           value={query}
           onChangeText={setQuery}
           onSubmitEditing={() => search()}
@@ -370,7 +354,6 @@ export default function SearchScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Category chips */}
       <ScrollView
         horizontal showsHorizontalScrollIndicator={false}
         style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}
@@ -388,7 +371,6 @@ export default function SearchScreen({ navigation }) {
         ))}
       </ScrollView>
 
-      {/* Source badges (shown after text search) */}
       {isTextSearch && activeSources.length > 0 && !loading && (
         <View style={styles.sourcesRow}>
           {activeSources.map(src => {
@@ -403,15 +385,13 @@ export default function SearchScreen({ navigation }) {
         </View>
       )}
 
-      {/* Toast */}
       {successMsg ? (
         <View style={styles.toast}><Text style={styles.toastText}>{successMsg}</Text></View>
       ) : null}
 
-      {/* Results */}
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator color="#B85C45" size="large" />
+          <ActivityIndicator color={colors.accent} size="large" />
           <Text style={styles.loadingText}>
             {searching ? 'Buscando en MercadoLibre y Amazon...' : 'Cargando productos...'}
           </Text>
@@ -419,20 +399,23 @@ export default function SearchScreen({ navigation }) {
         </View>
       ) : fetchError ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🔍</Text>
+          <View style={styles.emptyIconWrap}>
+            <Feather name="search" size={32} color={colors.muted} />
+          </View>
           <Text style={styles.emptyTitle}>Sin resultados</Text>
           <Text style={styles.emptyText}>{fetchError}</Text>
         </View>
       ) : groups.length === 0 ? (
         <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>🔍</Text>
+          <View style={styles.emptyIconWrap}>
+            <Feather name="search" size={32} color={colors.muted} />
+          </View>
           <Text style={styles.emptyTitle}>Sin resultados</Text>
           <Text style={styles.emptyText}>Intenta con otras palabras</Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-          {/* Results header */}
           <View style={styles.resultsHeader}>
             <Text style={styles.resultsText}>{resultsLabel}</Text>
             {inSelectionMode && (
@@ -442,13 +425,11 @@ export default function SearchScreen({ navigation }) {
             )}
           </View>
 
-          {/* Groups */}
           {groups.map(group => {
             const stores = [...new Set(group.items.map(i => i.source))];
             return (
               <View key={group.key} style={styles.groupSection}>
 
-                {/* Group header */}
                 <View style={styles.groupHeader}>
                   <Text style={styles.groupTitle} numberOfLines={1}>{group.label}</Text>
                   <View style={styles.groupMeta}>
@@ -464,7 +445,6 @@ export default function SearchScreen({ navigation }) {
                   </View>
                 </View>
 
-                {/* Product cards */}
                 <View style={styles.grid}>
                   {group.items.map(item => {
                     const k = itemKey(item);
@@ -481,19 +461,16 @@ export default function SearchScreen({ navigation }) {
                         }
                         activeOpacity={0.8}
                       >
-                        {/* Checkbox */}
                         <TouchableOpacity style={styles.checkboxWrap} onPress={() => toggleSelect(item)}>
                           <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-                            {isSelected && <Text style={styles.checkmark}>✓</Text>}
+                            {isSelected && <Feather name="check" size={12} color="white" />}
                           </View>
                         </TouchableOpacity>
 
-                        {/* Store badge */}
                         <View style={[styles.storeBadge, { backgroundColor: s.bg }]}>
                           <Text style={[styles.storeBadgeText, { color: s.color }]}>{s.label}</Text>
                         </View>
 
-                        {/* Image */}
                         <View style={styles.cardImg}>
                           {item.imageUrl || item.image_url
                             ? <Image
@@ -501,11 +478,10 @@ export default function SearchScreen({ navigation }) {
                                 style={styles.cardImgPhoto}
                                 resizeMode="contain"
                               />
-                            : <Text style={styles.cardEmoji}>📦</Text>
+                            : <Feather name="package" size={36} color={colors.muted} />
                           }
                         </View>
 
-                        {/* Info */}
                         <View style={styles.cardBody}>
                           {item.brand ? (
                             <Text style={styles.cardBrand}>{item.brand.toUpperCase()}</Text>
@@ -525,13 +501,13 @@ export default function SearchScreen({ navigation }) {
                           ) : null}
                         </View>
 
-                        {/* Link button */}
                         {item.permalink ? (
                           <TouchableOpacity
                             style={[styles.linkBtn, { borderColor: s.color }]}
                             onPress={() => Linking.openURL(item.permalink)}
                           >
-                            <Text style={[styles.linkBtnText, { color: s.color }]}>Ver →</Text>
+                            <Text style={[styles.linkBtnText, { color: s.color }]}>Ver</Text>
+                            <Feather name="arrow-right" size={11} color={s.color} />
                           </TouchableOpacity>
                         ) : null}
                       </TouchableOpacity>
@@ -546,29 +522,30 @@ export default function SearchScreen({ navigation }) {
         </ScrollView>
       )}
 
-      {/* Floating action bar */}
       {selected.size > 0 && (
         <View style={styles.floatBar}>
           <Text style={styles.floatCount}>
             {selected.size} seleccionado{selected.size !== 1 ? 's' : ''}
           </Text>
           <TouchableOpacity style={styles.floatBtn} onPress={() => setShowBulkModal(true)}>
-            <Text style={styles.floatBtnText}>🛍️ Agregar a Quiero comprar</Text>
+            <Feather name="shopping-bag" size={15} color="white" />
+            <Text style={styles.floatBtnText}>Agregar a lista</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* Bulk modal — 2 steps: confirm → price alert */}
       <Modal visible={showBulkModal} transparent animationType="slide">
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1}>
           <TouchableOpacity activeOpacity={1} style={styles.modalBox}>
             {!showAlertStep ? (
               <>
-                <Text style={styles.modalTitle}>🛍️ Quiero comprar</Text>
+                <View style={styles.modalTitleRow}>
+                  <Feather name="shopping-bag" size={18} color={colors.ink} />
+                  <Text style={styles.modalTitle}>Quiero comprar</Text>
+                </View>
                 <Text style={styles.modalSub}>
                   Agregarás {selected.size} producto{selected.size !== 1 ? 's' : ''} a tu lista
                 </Text>
-                {/* Preview of selected stores */}
                 <View style={styles.selectedStores}>
                   {[...new Set([...selected.values()].map(p => p.source))].map(src => {
                     const s = storeStyle(src);
@@ -591,7 +568,10 @@ export default function SearchScreen({ navigation }) {
               </>
             ) : (
               <>
-                <Text style={styles.modalTitle}>🔔 Alerta de precio</Text>
+                <View style={styles.modalTitleRow}>
+                  <Feather name="bell" size={18} color={colors.ink} />
+                  <Text style={styles.modalTitle}>Alerta de precio</Text>
+                </View>
                 <Text style={styles.modalSub}>
                   Avisame si cualquiera de estos {selected.size} productos baja de:
                 </Text>
@@ -626,95 +606,83 @@ export default function SearchScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#F8F5F0' },
+  container:        { flex: 1, backgroundColor: colors.bg },
 
-  // Header
-  header:           { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 56, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2DDD5' },
+  header:           { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 56, paddingBottom: 12, paddingHorizontal: 16, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
   backBtn:          { padding: 4 },
-  backText:         { fontSize: 22, color: '#1C1916' },
-  searchInput:      { flex: 1, backgroundColor: '#F8F5F0', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1.5, borderColor: '#E2DDD5', fontSize: 14 },
-  searchBtn:        { backgroundColor: '#B85C45', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  searchInput:      { flex: 1, backgroundColor: colors.bg, borderRadius: radius.md, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1.5, borderColor: colors.border, fontSize: 14, color: colors.ink },
+  searchBtn:        { backgroundColor: colors.accent, borderRadius: radius.md, paddingHorizontal: 14, paddingVertical: 10 },
   searchBtnText:    { color: 'white', fontWeight: '700', fontSize: 14 },
 
-  // Chips
-  chipsScroll:      { backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2DDD5', flexGrow: 0 },
+  chipsScroll:      { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border, flexGrow: 0 },
   chipsContent:     { paddingHorizontal: 16, paddingVertical: 10, gap: 8, flexDirection: 'row' },
-  chip:             { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 100, borderWidth: 1.5, borderColor: '#E2DDD5', backgroundColor: '#FFFFFF' },
-  chipActive:       { backgroundColor: '#1C1916', borderColor: '#1C1916' },
-  chipText:         { fontSize: 13, color: '#6E6860', fontWeight: '500' },
-  chipTextActive:   { color: '#FFFFFF', fontWeight: '600' },
+  chip:             { paddingHorizontal: 16, paddingVertical: 7, borderRadius: radius.full, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surface },
+  chipActive:       { backgroundColor: colors.ink, borderColor: colors.ink },
+  chipText:         { fontSize: 13, color: colors.muted, fontWeight: '500' },
+  chipTextActive:   { color: colors.surface, fontWeight: '600' },
 
-  // Source badges row
-  sourcesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2DDD5' },
-  sourceBadge:      { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 100 },
+  sourcesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingVertical: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  sourceBadge:      { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.full },
   sourceDot:        { width: 7, height: 7, borderRadius: 4 },
   sourceBadgeText:  { fontSize: 11, fontWeight: '600' },
 
-  // Toast
-  toast:            { backgroundColor: '#1C1916', margin: 16, borderRadius: 12, padding: 14, alignItems: 'center' },
+  toast:            { backgroundColor: colors.ink, margin: 16, borderRadius: radius.md, padding: 14, alignItems: 'center' },
   toastText:        { color: 'white', fontWeight: '600', fontSize: 14 },
 
-  // States
   center:           { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  loadingText:      { fontSize: 14, color: '#6E6860', textAlign: 'center', paddingHorizontal: 24 },
-  loadingHint:      { fontSize: 12, color: '#B0AFA8', textAlign: 'center' },
+  loadingText:      { fontSize: 14, color: colors.muted, textAlign: 'center', paddingHorizontal: 24 },
+  loadingHint:      { fontSize: 12, color: colors.muted, textAlign: 'center', opacity: 0.6 },
   empty:            { alignItems: 'center', paddingTop: 80 },
-  emptyIcon:        { fontSize: 48, marginBottom: 12 },
-  emptyTitle:       { fontSize: 18, fontWeight: '700', color: '#1C1916', marginBottom: 6 },
-  emptyText:        { fontSize: 14, color: '#6E6860', textAlign: 'center', paddingHorizontal: 32 },
+  emptyIconWrap:    { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  emptyTitle:       { fontSize: 18, fontWeight: '700', color: colors.ink, marginBottom: 6 },
+  emptyText:        { fontSize: 14, color: colors.muted, textAlign: 'center', paddingHorizontal: 32 },
 
-  // Scroll
   scrollContent:    { padding: 16, paddingBottom: 24 },
   resultsHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  resultsText:      { fontSize: 13, color: '#6E6860' },
-  clearText:        { fontSize: 13, color: '#B85C45', fontWeight: '600' },
+  resultsText:      { fontSize: 13, color: colors.muted },
+  clearText:        { fontSize: 13, color: colors.accent, fontWeight: '600' },
 
-  // Groups
   groupSection:     { marginBottom: 28 },
-  groupHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E2DDD5' },
-  groupTitle:       { fontSize: 15, fontWeight: '700', color: '#1C1916', flex: 1, marginRight: 8 },
+  groupHeader:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  groupTitle:       { fontSize: 15, fontWeight: '700', color: colors.ink, flex: 1, marginRight: 8 },
   groupMeta:        { flexDirection: 'row', alignItems: 'center', gap: 4 },
   groupStoreDot:    { width: 8, height: 8, borderRadius: 4 },
-  groupCount:       { fontSize: 11, color: '#6E6860', marginLeft: 2 },
+  groupCount:       { fontSize: 11, color: colors.muted, marginLeft: 2 },
 
-  // Cards
   grid:             { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  card:             { width: CARD_W, backgroundColor: '#FFFFFF', borderRadius: 16, overflow: 'hidden', borderWidth: 1.5, borderColor: '#E2DDD5' },
-  cardSelected:     { borderColor: '#B85C45', backgroundColor: '#F5EBE8' },
+  card:             { width: CARD_W, backgroundColor: colors.surface, borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1.5, borderColor: colors.border },
+  cardSelected:     { borderColor: colors.accent, backgroundColor: colors.redBg },
   checkboxWrap:     { position: 'absolute', top: 8, left: 8, zIndex: 10, padding: 4 },
-  checkbox:         { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: '#D0CFC8', backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' },
-  checkboxChecked:  { backgroundColor: '#B85C45', borderColor: '#B85C45' },
-  checkmark:        { color: 'white', fontSize: 11, fontWeight: '800' },
-  storeBadge:       { position: 'absolute', top: 8, right: 8, zIndex: 10, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6 },
+  checkbox:         { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: colors.border, backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center' },
+  checkboxChecked:  { backgroundColor: colors.accent, borderColor: colors.accent },
+  storeBadge:       { position: 'absolute', top: 8, right: 8, zIndex: 10, paddingHorizontal: 6, paddingVertical: 3, borderRadius: radius.sm },
   storeBadgeText:   { fontSize: 9, fontWeight: '700', letterSpacing: 0.2 },
-  cardImg:          { width: '100%', aspectRatio: 1, backgroundColor: '#F2EDE6', alignItems: 'center', justifyContent: 'center' },
+  cardImg:          { width: '100%', aspectRatio: 1, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
   cardImgPhoto:     { width: '100%', height: '100%' },
-  cardEmoji:        { fontSize: 44 },
   cardBody:         { padding: 10 },
-  cardBrand:        { fontSize: 9, color: '#6E6860', letterSpacing: 0.5, marginBottom: 2 },
-  cardName:         { fontSize: 12, fontWeight: '600', color: '#1C1916', marginBottom: 5, lineHeight: 17 },
+  cardBrand:        { fontSize: 9, color: colors.muted, letterSpacing: 0.5, marginBottom: 2 },
+  cardName:         { fontSize: 12, fontWeight: '600', color: colors.ink, marginBottom: 5, lineHeight: 17 },
   cardPrice:        { fontSize: 16, fontWeight: '800', marginBottom: 1 },
-  cardOriginalPrice:{ fontSize: 11, color: '#B0AFA8', textDecorationLine: 'line-through' },
-  linkBtn:          { margin: 8, marginTop: 0, borderWidth: 1.5, borderRadius: 8, paddingVertical: 6, alignItems: 'center' },
+  cardOriginalPrice:{ fontSize: 11, color: colors.muted, textDecorationLine: 'line-through', opacity: 0.7 },
+  linkBtn:          { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, margin: 8, marginTop: 0, borderWidth: 1.5, borderRadius: radius.sm, paddingVertical: 6 },
   linkBtnText:      { fontSize: 12, fontWeight: '600' },
 
-  // Float bar
-  floatBar:         { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 30, backgroundColor: '#1C1916', gap: 12 },
+  floatBar:         { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 14, paddingBottom: 30, backgroundColor: colors.ink, gap: 12 },
   floatCount:       { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontWeight: '500' },
-  floatBtn:         { flex: 1, backgroundColor: '#B85C45', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  floatBtn:         { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 12 },
   floatBtnText:     { color: 'white', fontWeight: '700', fontSize: 14 },
 
-  // Modal
   modalOverlay:     { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalBox:         { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, margin: 16, gap: 12 },
-  modalTitle:       { fontSize: 18, fontWeight: '700', color: '#1C1916' },
-  modalSub:         { fontSize: 14, color: '#6E6860', lineHeight: 20 },
+  modalBox:         { backgroundColor: colors.surface, borderRadius: radius.xl, padding: 24, margin: 16, gap: 12 },
+  modalTitleRow:    { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  modalTitle:       { fontSize: 18, fontWeight: '700', color: colors.ink },
+  modalSub:         { fontSize: 14, color: colors.muted, lineHeight: 20 },
   selectedStores:   { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  priceInputWrap:   { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#E2DDD5', borderRadius: 14, paddingHorizontal: 16 },
-  pricePrefix:      { fontSize: 24, fontWeight: '700', color: '#6E6860', marginRight: 4 },
-  priceInput:       { flex: 1, fontSize: 32, fontWeight: '700', color: '#1C1916', paddingVertical: 14 },
-  btnPrimary:       { backgroundColor: '#B85C45', borderRadius: 14, padding: 16, alignItems: 'center' },
+  priceInputWrap:   { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: 16 },
+  pricePrefix:      { fontSize: 24, fontWeight: '700', color: colors.muted, marginRight: 4 },
+  priceInput:       { flex: 1, fontSize: 32, fontWeight: '700', color: colors.ink, paddingVertical: 14 },
+  btnPrimary:       { backgroundColor: colors.accent, borderRadius: radius.lg, padding: 16, alignItems: 'center' },
   btnPrimaryText:   { color: 'white', fontSize: 16, fontWeight: '700' },
   cancelBtn:        { padding: 14, alignItems: 'center' },
-  cancelBtnText:    { fontSize: 15, color: '#6E6860' },
+  cancelBtnText:    { fontSize: 15, color: colors.muted },
 });

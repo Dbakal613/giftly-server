@@ -3,7 +3,9 @@ import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   TextInput, ActivityIndicator, Modal, Image,
 } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { supabase } from '../lib/supabase';
+import { colors, radius } from '../lib/theme';
 
 export default function PublicGiftScreen({ route, navigation }) {
   const { giftId } = route.params || {};
@@ -50,14 +52,12 @@ export default function PublicGiftScreen({ route, navigation }) {
       return;
     }
 
-    // Load contributions (paid or accepted)
     const { data: contribs } = await supabase
       .from('group_gift_members')
       .select('id, amount, status, contributor_name, user_id')
       .eq('group_gift_id', giftId)
       .in('status', ['paid', 'accepted']);
 
-    // Enrich with profiles for registered contributors
     const userIds = (contribs || []).filter(c => c.user_id).map(c => c.user_id);
     let profilesById = {};
     if (userIds.length) {
@@ -119,7 +119,7 @@ export default function PublicGiftScreen({ route, navigation }) {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#B85C45" size="large" />
+        <ActivityIndicator color={colors.accent} size="large" />
       </View>
     );
   }
@@ -127,7 +127,9 @@ export default function PublicGiftScreen({ route, navigation }) {
   if (!gift) {
     return (
       <View style={styles.center}>
-        <Text style={{ fontSize: 48, marginBottom: 16 }}>🎁</Text>
+        <View style={styles.emptyIconWrap}>
+          <Feather name="gift" size={36} color={colors.muted} />
+        </View>
         <Text style={styles.errorTitle}>Regalo no encontrado</Text>
         <Text style={styles.errorSub}>Este link puede ser inválido o el regalo fue eliminado.</Text>
         <TouchableOpacity style={[styles.btnSecondary, { marginTop: 20 }]} onPress={() => navigation.navigate('Login')}>
@@ -140,7 +142,9 @@ export default function PublicGiftScreen({ route, navigation }) {
   if (success) {
     return (
       <View style={styles.center}>
-        <Text style={{ fontSize: 72, marginBottom: 20 }}>🎉</Text>
+        <View style={styles.successIconWrap}>
+          <Feather name="check-circle" size={52} color={colors.green} />
+        </View>
         <Text style={styles.successTitle}>¡Aporte registrado!</Text>
         <Text style={styles.successSub}>
           Gracias por contribuir al regalo de {gift.recipient_name}.
@@ -148,7 +152,7 @@ export default function PublicGiftScreen({ route, navigation }) {
         </Text>
         {!currentUser && (
           <TouchableOpacity style={styles.btnPrimary} onPress={() => navigation.navigate('Login')}>
-            <Text style={styles.btnPrimaryText}>Crear cuenta en Giftly →</Text>
+            <Text style={styles.btnPrimaryText}>Crear cuenta en Giftly</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity style={styles.cancelBtn} onPress={() => setSuccess(false)}>
@@ -160,7 +164,6 @@ export default function PublicGiftScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.logo}>gift<Text style={styles.logoBlack}>ly</Text></Text>
         {!currentUser ? (
@@ -169,13 +172,12 @@ export default function PublicGiftScreen({ route, navigation }) {
           </TouchableOpacity>
         ) : (
           <TouchableOpacity style={styles.loginBtn} onPress={() => navigation.navigate('Home')}>
-            <Text style={styles.loginBtnText}>Ir a la app →</Text>
+            <Text style={styles.loginBtnText}>Ir a la app</Text>
           </TouchableOpacity>
         )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Hero */}
         <View style={styles.heroCard}>
           <Text style={styles.heroLabel}>Regalo grupal para</Text>
           <Text style={styles.heroName}>{gift.recipient_name}</Text>
@@ -183,13 +185,14 @@ export default function PublicGiftScreen({ route, navigation }) {
           {gift.message ? <Text style={styles.heroMessage}>"{gift.message}"</Text> : null}
         </View>
 
-        {/* Product */}
         {gift.products && (
           <View style={styles.productCard}>
             {gift.products.image_url ? (
               <Image source={{ uri: gift.products.image_url }} style={styles.productImg} resizeMode="contain" />
             ) : (
-              <Text style={styles.productEmoji}>{gift.products.image_emoji || '🎁'}</Text>
+              <View style={styles.productIconWrap}>
+                <Feather name="package" size={32} color={colors.muted} />
+              </View>
             )}
             <View style={{ flex: 1 }}>
               <Text style={styles.productName} numberOfLines={2}>{gift.products.name}</Text>
@@ -199,10 +202,12 @@ export default function PublicGiftScreen({ route, navigation }) {
           </View>
         )}
 
-        {/* Progress */}
         <View style={styles.progressCard}>
           <View style={styles.progressRow}>
-            <Text style={styles.progressLabel}>💰 Recaudado</Text>
+            <View style={styles.progressLabelRow}>
+              <Feather name="dollar-sign" size={12} color={colors.muted} />
+              <Text style={styles.progressLabel}>Recaudado</Text>
+            </View>
             {totalTarget > 0 && <Text style={styles.progressPctText}>{Math.round(progressPct)}%</Text>}
           </View>
           <Text style={styles.progressAmount}>${totalCollected.toLocaleString('es-CL')}</Text>
@@ -216,12 +221,14 @@ export default function PublicGiftScreen({ route, navigation }) {
           )}
         </View>
 
-        {/* Contributors */}
         {contributions.length > 0 && (
           <View style={styles.contribCard}>
-            <Text style={styles.contribTitle}>
-              👥 {contributions.length} aporte{contributions.length !== 1 ? 's' : ''}
-            </Text>
+            <View style={styles.contribTitleRow}>
+              <Feather name="users" size={13} color={colors.muted} />
+              <Text style={styles.contribTitle}>
+                {contributions.length} aporte{contributions.length !== 1 ? 's' : ''}
+              </Text>
+            </View>
             {contributions.map((c, i) => (
               <View key={c.id || i} style={styles.contribRow}>
                 <View style={styles.contribAvatar}>
@@ -236,10 +243,10 @@ export default function PublicGiftScreen({ route, navigation }) {
           </View>
         )}
 
-        {/* CTA */}
         <View style={styles.ctaSection}>
           <TouchableOpacity style={styles.btnPrimary} onPress={() => { setErrorMsg(''); setShowModal(true); }}>
-            <Text style={styles.btnPrimaryText}>🎁 Aportar al regalo</Text>
+            <Feather name="gift" size={16} color="white" />
+            <Text style={styles.btnPrimaryText}>Aportar al regalo</Text>
           </TouchableOpacity>
           {!currentUser && (
             <TouchableOpacity style={styles.btnSecondary} onPress={() => navigation.navigate('Login')}>
@@ -251,7 +258,6 @@ export default function PublicGiftScreen({ route, navigation }) {
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Contribution modal */}
       <Modal visible={showModal} transparent animationType="slide">
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setShowModal(false)}>
           <TouchableOpacity activeOpacity={1} style={styles.modalBox}>
@@ -309,7 +315,7 @@ export default function PublicGiftScreen({ route, navigation }) {
                 style={styles.btnSecondary}
                 onPress={() => { setShowModal(false); navigation.navigate('Login'); }}
               >
-                <Text style={styles.btnSecondaryText}>Mejor me registro →</Text>
+                <Text style={styles.btnSecondaryText}>Mejor me registro</Text>
               </TouchableOpacity>
             )}
 
@@ -324,69 +330,74 @@ export default function PublicGiftScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#F8F5F0' },
-  center:           { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: '#F8F5F0' },
+  container:        { flex: 1, backgroundColor: colors.bg },
+  center:           { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, backgroundColor: colors.bg },
 
-  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2DDD5' },
-  logo:             { fontSize: 26, fontWeight: '800', color: '#B85C45', letterSpacing: -1 },
-  logoBlack:        { color: '#1C1916' },
-  loginBtn:         { borderWidth: 1.5, borderColor: '#E2DDD5', borderRadius: 100, paddingHorizontal: 16, paddingVertical: 7 },
-  loginBtnText:     { fontSize: 13, fontWeight: '600', color: '#1C1916' },
+  emptyIconWrap:    { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  successIconWrap:  { width: 88, height: 88, borderRadius: 44, backgroundColor: colors.greenBg, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
+
+  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  logo:             { fontSize: 26, fontWeight: '800', color: colors.accent, letterSpacing: -1 },
+  logoBlack:        { color: colors.ink },
+  loginBtn:         { borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.full, paddingHorizontal: 16, paddingVertical: 7 },
+  loginBtnText:     { fontSize: 13, fontWeight: '600', color: colors.ink },
 
   scroll:           { padding: 20, gap: 14 },
 
-  heroCard:         { backgroundColor: '#1C1916', borderRadius: 20, padding: 24 },
+  heroCard:         { backgroundColor: colors.ink, borderRadius: radius.xl, padding: 24 },
   heroLabel:        { fontSize: 13, color: 'rgba(255,255,255,0.5)', marginBottom: 4 },
-  heroName:         { fontSize: 28, fontWeight: '800', color: '#FFFFFF', marginBottom: 4 },
+  heroName:         { fontSize: 28, fontWeight: '800', color: colors.surface, marginBottom: 4 },
   heroOccasion:     { fontSize: 14, color: 'rgba(255,255,255,0.6)', marginBottom: 8 },
   heroMessage:      { fontSize: 14, color: 'rgba(255,255,255,0.5)', fontStyle: 'italic' },
 
-  productCard:      { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E2DDD5' },
-  productImg:       { width: 72, height: 72, borderRadius: 10, backgroundColor: '#F2EDE6' },
-  productEmoji:     { fontSize: 40, width: 72, textAlign: 'center' },
-  productName:      { fontSize: 14, fontWeight: '600', color: '#1C1916', marginBottom: 3 },
-  productStore:     { fontSize: 12, color: '#6E6860', marginBottom: 4 },
-  productPrice:     { fontSize: 18, fontWeight: '800', color: '#B85C45' },
+  productCard:      { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 16, borderWidth: 1, borderColor: colors.border },
+  productImg:       { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: colors.tagBg },
+  productIconWrap:  { width: 72, height: 72, borderRadius: radius.sm, backgroundColor: colors.tagBg, alignItems: 'center', justifyContent: 'center' },
+  productName:      { fontSize: 14, fontWeight: '600', color: colors.ink, marginBottom: 3 },
+  productStore:     { fontSize: 12, color: colors.muted, marginBottom: 4 },
+  productPrice:     { fontSize: 18, fontWeight: '800', color: colors.accent },
 
-  progressCard:     { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: '#E2DDD5', gap: 4 },
+  progressCard:     { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 20, borderWidth: 1, borderColor: colors.border, gap: 4 },
   progressRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  progressLabel:    { fontSize: 12, fontWeight: '700', color: '#6E6860', textTransform: 'uppercase', letterSpacing: 0.5 },
-  progressPctText:  { fontSize: 13, fontWeight: '700', color: '#3E7A5E' },
-  progressAmount:   { fontSize: 34, fontWeight: '800', color: '#3E7A5E' },
-  progressTarget:   { fontSize: 14, color: '#6E6860', marginTop: -2 },
-  progressBar:      { height: 8, backgroundColor: '#F2EDE6', borderRadius: 100, overflow: 'hidden', marginTop: 8 },
-  progressFill:     { height: '100%', backgroundColor: '#3E7A5E', borderRadius: 100 },
+  progressLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  progressLabel:    { fontSize: 12, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  progressPctText:  { fontSize: 13, fontWeight: '700', color: colors.green },
+  progressAmount:   { fontSize: 34, fontWeight: '800', color: colors.green },
+  progressTarget:   { fontSize: 14, color: colors.muted, marginTop: -2 },
+  progressBar:      { height: 8, backgroundColor: colors.tagBg, borderRadius: radius.full, overflow: 'hidden', marginTop: 8 },
+  progressFill:     { height: '100%', backgroundColor: colors.green, borderRadius: radius.full },
 
-  contribCard:      { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, borderWidth: 1, borderColor: '#E2DDD5' },
-  contribTitle:     { fontSize: 12, fontWeight: '700', color: '#6E6860', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
-  contribRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: '#F8F8F5' },
-  contribAvatar:    { width: 34, height: 34, borderRadius: 17, backgroundColor: '#B85C45', alignItems: 'center', justifyContent: 'center' },
+  contribCard:      { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 18, borderWidth: 1, borderColor: colors.border },
+  contribTitleRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  contribTitle:     { fontSize: 12, fontWeight: '700', color: colors.muted, textTransform: 'uppercase', letterSpacing: 0.5 },
+  contribRow:       { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.tagBg },
+  contribAvatar:    { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' },
   contribAvatarText:{ color: 'white', fontWeight: '700', fontSize: 14 },
-  contribName:      { flex: 1, fontSize: 14, fontWeight: '500', color: '#1C1916' },
-  contribAmount:    { fontSize: 14, fontWeight: '700', color: '#3E7A5E' },
+  contribName:      { flex: 1, fontSize: 14, fontWeight: '500', color: colors.ink },
+  contribAmount:    { fontSize: 14, fontWeight: '700', color: colors.green },
 
   ctaSection:       { gap: 10 },
 
-  errorTitle:       { fontSize: 22, fontWeight: '700', color: '#1C1916', marginBottom: 8, textAlign: 'center' },
-  errorSub:         { fontSize: 15, color: '#6E6860', textAlign: 'center' },
-  successTitle:     { fontSize: 26, fontWeight: '700', color: '#1C1916', marginBottom: 10, textAlign: 'center' },
-  successSub:       { fontSize: 15, color: '#6E6860', textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  errorTitle:       { fontSize: 22, fontWeight: '700', color: colors.ink, marginBottom: 8, textAlign: 'center' },
+  errorSub:         { fontSize: 15, color: colors.muted, textAlign: 'center' },
+  successTitle:     { fontSize: 26, fontWeight: '700', color: colors.ink, marginBottom: 10, textAlign: 'center' },
+  successSub:       { fontSize: 15, color: colors.muted, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
 
   overlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalBox:         { backgroundColor: '#FFFFFF', borderRadius: 24, padding: 24, margin: 16, gap: 10 },
-  modalTitle:       { fontSize: 18, fontWeight: '700', color: '#1C1916' },
-  modalSub:         { fontSize: 13, color: '#6E6860', marginTop: -6 },
-  fieldLabel:       { fontSize: 11, fontWeight: '600', color: '#6E6860', textTransform: 'uppercase', letterSpacing: 1 },
-  input:            { borderWidth: 1.5, borderColor: '#E2DDD5', borderRadius: 12, padding: 14, fontSize: 15, color: '#1C1916', backgroundColor: '#F8F5F0' },
-  amountWrap:       { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: '#E2DDD5', borderRadius: 14, paddingHorizontal: 16 },
-  amountPrefix:     { fontSize: 24, fontWeight: '700', color: '#6E6860', marginRight: 4 },
-  amountInput:      { flex: 1, fontSize: 32, fontWeight: '700', color: '#1C1916', paddingVertical: 14 },
-  modalHint:        { fontSize: 12, color: '#6E6860' },
-  errorText:        { fontSize: 13, color: '#B85C45', fontWeight: '500' },
-  btnPrimary:       { backgroundColor: '#B85C45', borderRadius: 14, padding: 16, alignItems: 'center' },
+  modalBox:         { backgroundColor: colors.surface, borderRadius: radius.xl, padding: 24, margin: 16, gap: 10 },
+  modalTitle:       { fontSize: 18, fontWeight: '700', color: colors.ink },
+  modalSub:         { fontSize: 13, color: colors.muted, marginTop: -6 },
+  fieldLabel:       { fontSize: 11, fontWeight: '600', color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 },
+  input:            { borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.md, padding: 14, fontSize: 15, color: colors.ink, backgroundColor: colors.bg },
+  amountWrap:       { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: colors.border, borderRadius: radius.lg, paddingHorizontal: 16 },
+  amountPrefix:     { fontSize: 24, fontWeight: '700', color: colors.muted, marginRight: 4 },
+  amountInput:      { flex: 1, fontSize: 32, fontWeight: '700', color: colors.ink, paddingVertical: 14 },
+  modalHint:        { fontSize: 12, color: colors.muted },
+  errorText:        { fontSize: 13, color: colors.accent, fontWeight: '500' },
+  btnPrimary:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: colors.accent, borderRadius: radius.lg, padding: 16 },
   btnPrimaryText:   { color: 'white', fontSize: 16, fontWeight: '700' },
-  btnSecondary:     { borderWidth: 1.5, borderColor: '#E2DDD5', borderRadius: 14, padding: 14, alignItems: 'center' },
-  btnSecondaryText: { fontSize: 15, fontWeight: '600', color: '#1C1916' },
+  btnSecondary:     { borderWidth: 1.5, borderColor: colors.border, borderRadius: radius.lg, padding: 14, alignItems: 'center' },
+  btnSecondaryText: { fontSize: 15, fontWeight: '600', color: colors.ink },
   cancelBtn:        { padding: 14, alignItems: 'center' },
-  cancelText:       { fontSize: 15, color: '#6E6860' },
+  cancelText:       { fontSize: 15, color: colors.muted },
 });

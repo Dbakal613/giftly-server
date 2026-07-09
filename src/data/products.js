@@ -5,15 +5,15 @@
  */
 
 export const CATEGORIES = [
-  { id: 'botellas', label: 'Botellas y termos', emoji: '🧊' },
-  { id: 'ropa', label: 'Ropa', emoji: '👕' },
-  { id: 'accesorios', label: 'Accesorios', emoji: '👜' },
-  { id: 'decoracion', label: 'Decoración', emoji: '🏡' },
-  { id: 'outdoor', label: 'Outdoor', emoji: '🏔' },
-  { id: 'lifestyle', label: 'Lifestyle', emoji: '✨' },
-  { id: 'tech', label: 'Tecnología chica', emoji: '🎧' },
-  { id: 'utiles', label: 'Regalos útiles', emoji: '🎁' },
-  { id: 'premium', label: 'Regalos premium', emoji: '💎' },
+  { id: 'botellas',   label: 'Botellas y termos', icon: 'coffee' },
+  { id: 'ropa',       label: 'Ropa',               icon: 'shopping-bag' },
+  { id: 'accesorios', label: 'Accesorios',          icon: 'watch' },
+  { id: 'decoracion', label: 'Decoración',          icon: 'home' },
+  { id: 'outdoor',    label: 'Outdoor',             icon: 'compass' },
+  { id: 'lifestyle',  label: 'Lifestyle',           icon: 'sun' },
+  { id: 'tech',       label: 'Tecnología chica',    icon: 'cpu' },
+  { id: 'utiles',     label: 'Regalos útiles',      icon: 'gift' },
+  { id: 'premium',    label: 'Regalos premium',     icon: 'star' },
 ];
 
 export const BRANDS = ['Bubba', 'Launge', 'Froens', 'Wild Lama', 'Raindoor', 'Limited'];
