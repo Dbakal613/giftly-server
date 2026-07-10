@@ -147,20 +147,30 @@ export default function HomeScreen({ navigation }) {
           <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.55)" />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          onPress={() => navigation.navigate('Recommendations')}
-          style={styles.recsBanner}
-          activeOpacity={0.88}
-        >
-          <View style={styles.recsBannerIcon}>
-            <Feather name="zap" size={18} color={colors.accent} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.recsBannerTitle}>Recomendaciones para ti</Text>
-            <Text style={styles.recsBannerSub}>Basadas en tus intereses y preferencias</Text>
-          </View>
-          <Feather name="chevron-right" size={18} color={colors.muted} />
-        </TouchableOpacity>
+        <View style={styles.recsBannerRow}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('Recommendations')}
+            style={styles.recsBannerCard}
+            activeOpacity={0.88}
+          >
+            <View style={styles.recsBannerCardIcon}>
+              <Feather name="zap" size={16} color={colors.accent} />
+            </View>
+            <Text style={styles.recsBannerCardTitle}>Para mí</Text>
+            <Text style={styles.recsBannerCardSub}>Según tus gustos</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('GiftRecommendations')}
+            style={[styles.recsBannerCard, styles.recsBannerCardGift]}
+            activeOpacity={0.88}
+          >
+            <View style={[styles.recsBannerCardIcon, styles.recsBannerCardIconGift]}>
+              <Feather name="gift" size={16} color="white" />
+            </View>
+            <Text style={[styles.recsBannerCardTitle, { color: 'white' }]}>Para regalar</Text>
+            <Text style={[styles.recsBannerCardSub, { color: 'rgba(255,255,255,0.65)' }]}>Ideas personalizadas</Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -304,10 +314,13 @@ const styles = StyleSheet.create({
   exploreBannerTitle: { fontSize: 15, fontWeight: '700', color: 'white', marginBottom: 3 },
   exploreBannerSub:   { fontSize: 12, color: 'rgba(255,255,255,0.55)' },
 
-  recsBanner:         { flexDirection: 'row', alignItems: 'center', gap: 14, marginHorizontal: 16, marginBottom: 8, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 16, borderWidth: 1, borderColor: colors.border },
-  recsBannerIcon:     { width: 40, height: 40, borderRadius: 12, backgroundColor: colors.accentLight, alignItems: 'center', justifyContent: 'center' },
-  recsBannerTitle:    { fontSize: 15, fontWeight: '700', color: colors.ink, marginBottom: 2 },
-  recsBannerSub:      { fontSize: 12, color: colors.muted },
+  recsBannerRow:          { flexDirection: 'row', gap: 10, marginHorizontal: 16, marginBottom: 8 },
+  recsBannerCard:         { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 16, borderWidth: 1, borderColor: colors.border },
+  recsBannerCardGift:     { backgroundColor: colors.accent, borderColor: colors.accent },
+  recsBannerCardIcon:     { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.accentLight, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  recsBannerCardIconGift: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  recsBannerCardTitle:    { fontSize: 14, fontWeight: '700', color: colors.ink, marginBottom: 2 },
+  recsBannerCardSub:      { fontSize: 11, color: colors.muted },
 
   section:       { paddingHorizontal: 16, paddingTop: 8 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },

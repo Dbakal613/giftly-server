@@ -7,14 +7,13 @@ import { Feather } from '@expo/vector-icons';
 import { colors, radius, shadow } from '../lib/theme';
 import { CATEGORIES } from '../data/products';
 import {
-  getRecommendations, BUDGET_RANGES, OCCASIONS, FEEDBACK_OPTIONS,
+  getRecommendations, BUDGET_RANGES, FEEDBACK_OPTIONS,
 } from '../services/recommendations';
 import { getCurrentUser } from '../services/auth';
 import { fetchProfile } from '../services/profiles';
 import ScreenHeader from '../components/ScreenHeader';
 
-export default function RecommendationsScreen({ navigation }) {
-  const [mode, setMode]         = useState('self');
+export default function RecommendationsScreen({ navigation, route }) {
   const [occasion, setOccasion] = useState(null);
   const [budget, setBudget]     = useState('any');
   const [catFilter, setCatFilter] = useState(null);
@@ -32,7 +31,7 @@ export default function RecommendationsScreen({ navigation }) {
 
   useEffect(() => {
     if (!loading) regenerate();
-  }, [mode, occasion, budget, catFilter, dismissed, preferences]);
+  }, [occasion, budget, catFilter, dismissed, preferences]);
 
   async function loadPreferences() {
     try {
@@ -56,11 +55,11 @@ export default function RecommendationsScreen({ navigation }) {
       occasion:            occasion,
       budgetMin:           budgetRange?.min ?? 0,
       budgetMax:           budgetRange?.max ?? null,
-      mode,
+      mode:                'self',
       exclude:             dismissed,
     });
     setRecs(results);
-  }, [mode, occasion, budget, catFilter, dismissed, preferences]);
+  }, [occasion, budget, catFilter, dismissed, preferences]);
 
   function handleFeedback(productId, key) {
     setFeedback(prev => {
@@ -94,12 +93,12 @@ export default function RecommendationsScreen({ navigation }) {
         keyExtractor={item => item.product.id}
         ListHeaderComponent={
           <ListHeader
-            mode={mode} setMode={setMode}
             occasion={occasion} setOccasion={setOccasion}
             budget={budget} setBudget={setBudget}
             catFilter={catFilter} setCatFilter={setCatFilter}
             showPrivacy={showPrivacy} setShowPrivacy={setShowPrivacy}
             total={recs.length}
+            onGiftMode={() => navigation.navigate('GiftRecommendations')}
           />
         }
         ListEmptyComponent={
@@ -128,7 +127,7 @@ export default function RecommendationsScreen({ navigation }) {
   );
 }
 
-function ListHeader({ mode, setMode, occasion, setOccasion, budget, setBudget, catFilter, setCatFilter, showPrivacy, setShowPrivacy, total }) {
+function ListHeader({ occasion, setOccasion, budget, setBudget, catFilter, setCatFilter, showPrivacy, setShowPrivacy, total, onGiftMode }) {
   return (
     <View>
       {showPrivacy && (
@@ -142,42 +141,21 @@ function ListHeader({ mode, setMode, occasion, setOccasion, budget, setBudget, c
       )}
 
       <View style={styles.modeRow}>
-        {['self', 'gift'].map(m => (
-          <TouchableOpacity
-            key={m}
-            style={[styles.modeBtn, mode === m && styles.modeBtnActive]}
-            onPress={() => setMode(m)}
-          >
-            <Feather
-              name={m === 'self' ? 'user' : 'gift'}
-              size={14}
-              color={mode === m ? 'white' : colors.muted}
-            />
-            <Text style={[styles.modeBtnText, mode === m && styles.modeBtnTextActive]}>
-              {m === 'self' ? 'Para mí' : 'Para regalar'}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {mode === 'gift' && (
-        <ScrollView
-          horizontal showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll} contentContainerStyle={styles.filterContent}
+        <TouchableOpacity
+          style={[styles.modeBtn, styles.modeBtnActive]}
+          onPress={() => setMode('self')}
         >
-          <Text style={styles.filterSectionLabel}>Ocasión</Text>
-          {OCCASIONS.map(occ => (
-            <TouchableOpacity
-              key={occ.key}
-              style={[styles.chip, occasion === occ.key && styles.chipActive]}
-              onPress={() => setOccasion(prev => prev === occ.key ? null : occ.key)}
-            >
-              <Feather name={occ.icon} size={12} color={occasion === occ.key ? 'white' : colors.muted} />
-              <Text style={[styles.chipText, occasion === occ.key && styles.chipTextActive]}>{occ.key}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+          <Feather name="user" size={14} color="white" />
+          <Text style={[styles.modeBtnText, styles.modeBtnTextActive]}>Para mí</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.modeBtn}
+          onPress={onGiftMode}
+        >
+          <Feather name="gift" size={14} color={colors.muted} />
+          <Text style={styles.modeBtnText}>Para regalar</Text>
+        </TouchableOpacity>
+      </View>
 
       <ScrollView
         horizontal showsHorizontalScrollIndicator={false}

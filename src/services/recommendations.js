@@ -1,5 +1,28 @@
 import { PRODUCTS, CATEGORIES } from '../data/products';
 
+export const INTEREST_TO_CATEGORIES = {
+  'Tecnología':     ['tech'],
+  'Moda':           ['ropa', 'accesorios'],
+  'Hogar':          ['decoracion', 'utiles'],
+  'Deportes':       ['outdoor', 'utiles', 'ropa'],
+  'Belleza':        ['lifestyle', 'accesorios'],
+  'Cocina':         ['utiles', 'decoracion'],
+  'Libros':         ['utiles', 'lifestyle'],
+  'Viajes':         ['outdoor', 'accesorios', 'botellas'],
+  'Gaming':         ['tech'],
+  'Música':         ['tech', 'lifestyle', 'accesorios'],
+  'Arte':           ['decoracion', 'utiles', 'lifestyle'],
+  'Fotografía':     ['tech', 'accesorios'],
+  'Naturaleza':     ['outdoor', 'botellas'],
+  'Fitness':        ['outdoor', 'botellas', 'ropa'],
+  'Mascotas':       ['utiles', 'lifestyle'],
+  'Películas':      ['tech', 'lifestyle'],
+  'Podcast':        ['tech'],
+  'Yoga':           ['ropa', 'lifestyle'],
+  'Café':           ['botellas', 'utiles'],
+  'Sostenibilidad': ['botellas', 'outdoor', 'lifestyle'],
+};
+
 const OCCASION_BOOSTS = {
   'Cumpleaños':  ['lifestyle', 'accesorios', 'premium', 'utiles', 'botellas'],
   'Navidad':     ['premium', 'tech', 'lifestyle', 'decoracion'],
@@ -85,6 +108,66 @@ export const OCCASIONS = [
   { key: 'Nuevo hogar', icon: 'home' },
   { key: 'Otro',        icon: 'more-horizontal' },
 ];
+
+function buildRecipientWhy(product, { recipient, preferredCategories, occasion }) {
+  const name = recipient?.name || 'tu destinatario';
+  const catLabel = CATEGORIES.find(c => c.id === product.category)?.label?.toLowerCase() || '';
+
+  if (occasion && OCCASION_BOOSTS[occasion]?.includes(product.category)) {
+    return `Ideal para el ${occasion} de ${name}`;
+  }
+  if (preferredCategories.includes(product.category)) {
+    const matchingInterest = Object.entries(INTEREST_TO_CATEGORIES)
+      .find(([interest, cats]) =>
+        cats.includes(product.category) && recipient?.interests?.includes(interest)
+      )?.[0];
+    if (matchingInterest) {
+      return `Recomendado para ${name} porque le gusta ${matchingInterest.toLowerCase()}`;
+    }
+    return `Coincide con los intereses de ${name}`;
+  }
+  if (product.category === 'premium') return `Un regalo que va a impresionar a ${name}`;
+  if (product.tags?.includes('regalo práctico')) return `Un regalo práctico que ${name} va a usar`;
+  return `Buena opción para ${name}`;
+}
+
+export function getGiftRecommendations({
+  recipient = null,
+  categoryFilter = null,
+  occasionOverride = null,
+  budgetMin = 0,
+  budgetMax = null,
+  exclude = new Set(),
+} = {}) {
+  const occasion = occasionOverride || recipient?.default_occasion || null;
+  const maxBudget = budgetMax !== null ? budgetMax : (recipient?.budget_max ?? null);
+
+  const preferredCategories = (recipient?.interests || [])
+    .flatMap(i => INTEREST_TO_CATEGORIES[i] || [])
+    .filter((c, idx, arr) => arr.indexOf(c) === idx);
+
+  let products = PRODUCTS.filter(p => p.available !== false && !exclude.has(p.id));
+
+  if (categoryFilter) products = products.filter(p => p.category === categoryFilter);
+  if (maxBudget !== null) products = products.filter(p => p.price <= maxBudget);
+  if (budgetMin > 0)      products = products.filter(p => p.price >= budgetMin);
+
+  const scored = products.map(p => {
+    let score = 40;
+    if (preferredCategories.includes(p.category))                     score += 40;
+    if (occasion && OCCASION_BOOSTS[occasion]?.includes(p.category))  score += 20;
+    if (['premium', 'accesorios'].includes(p.category))               score += 10;
+    score += Math.random() * 10;
+
+    return {
+      product: p,
+      score,
+      why: buildRecipientWhy(p, { recipient, preferredCategories, occasion }),
+    };
+  });
+
+  return scored.sort((a, b) => b.score - a.score).slice(0, 20);
+}
 
 export const FEEDBACK_OPTIONS = [
   { key: 'like',      label: 'Me gusta',     icon: 'thumbs-up'    },
